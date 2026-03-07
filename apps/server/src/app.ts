@@ -1,7 +1,7 @@
 import { loadEnv } from "./infra/config";
 import { createLogger } from "./infra/logging";
 import { createOpenRouterProvider } from "./infra/providers/openrouter-provider";
-import { createPostgresTaskDatabase } from "./infra/storage/postgres-task-database";
+import { createInMemoryTaskStore } from "./infra/storage/in-memory-task-store";
 import { createVectorDatabase } from "./infra/storage/vector-database";
 import type { CompletedRun, HydratedTask, TaskRequest } from "./shared/types";
 import { createContextHydrator } from "./system/context-hydrator";
@@ -23,11 +23,11 @@ export function createApp(): App {
   const env = loadEnv();
   const logger = createLogger();
 
-  const taskDatabase = createPostgresTaskDatabase({ logger });
+  const taskStore = createInMemoryTaskStore({ logger });
   const vectorDatabase = createVectorDatabase({ logger });
   const externalModelProvider = createOpenRouterProvider({ logger });
 
-  const taskListManager = createTaskListManager({ logger, taskDatabase });
+  const taskListManager = createTaskListManager({ logger, taskStore });
   const vectorSearchEngine = createVectorSearchEngine({ logger, vectorDatabase });
   const contextHydrator = createContextHydrator({ logger, vectorSearchEngine });
   const taskOrchestrator = createTaskOrchestrator({
@@ -58,7 +58,13 @@ export function createApp(): App {
         taskHint: "Prepare the next task with hydrated context."
       };
 
-      const hydratedTask: HydratedTask = await executionLoop.run(request);
+      const hydratedTask: HydratedTask | null = await executionLoop.run(request);
+
+      if (!hydratedTask) {
+        logger.section("Done");
+        logger.info("bootstrap", "Runnable skeleton completed with no available task.");
+        return;
+      }
 
       const completedRun: CompletedRun = {
         taskId: hydratedTask.id,

@@ -1,24 +1,24 @@
 import type { Logger } from "../../infra/logging";
-import type { PostgresTaskDatabase } from "../../infra/storage/postgres-task-database";
+import type { TaskStore } from "../../infra/storage/task-store";
 import type { TaskListManager } from "./types";
 
 interface CreateTaskListManagerParams {
   logger: Logger;
-  taskDatabase: PostgresTaskDatabase;
+  taskStore: TaskStore;
 }
 
 export function createTaskListManager({
   logger,
-  taskDatabase
+  taskStore
 }: CreateTaskListManagerParams): TaskListManager {
   return {
-    async selectAvailableTask(projectId) {
+    async claimNextTask(projectId, agentName) {
       logger.step(
         "task-list-manager",
-        "Task list manager queries the task database for dependency-aware available work."
+        "Task list manager asks the task store to claim the next available task."
       );
 
-      return taskDatabase.getAvailableTask(projectId);
+      return taskStore.claimNextTask(projectId, agentName);
     }
   };
 }
