@@ -10,10 +10,7 @@ export function createOpenRouterProvider({ logger }: CreateOpenRouterProviderPar
   return {
     name: "openrouter",
     async generate(request: ModelRequest): Promise<ModelResponse> {
-      logger.step(
-        "provider:openrouter",
-        `OpenRouter receives a placeholder request for contextual indexing: ${request.prompt}`
-      );
+      logger.step("provider:openrouter", "OpenRouter receives a placeholder contextual indexing request.");
 
       return {
         provider: "openrouter",

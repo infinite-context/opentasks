@@ -4,20 +4,25 @@ export interface Logger {
   info(scope: string, message: string): void;
 }
 
-function formatLine(scope: string, message: string): string {
-  return `${new Date().toISOString()} [${scope}] ${message}`;
+function formatScope(scope: string): string {
+  return scope.padEnd(24, " ");
 }
 
 export function createLogger(): Logger {
+  let stepCount = 0;
+
   return {
     section(title) {
+      stepCount = 0;
       console.log(`\n=== ${title} ===`);
     },
     step(scope, message) {
-      console.log(formatLine(scope, message));
+      stepCount += 1;
+      const number = String(stepCount).padStart(2, "0");
+      console.log(`${number}. ${formatScope(scope)} ${message}`);
     },
     info(scope, message) {
-      console.log(formatLine(scope, message));
+      console.log(`-  ${formatScope(scope)} ${message}`);
     }
   };
 }
