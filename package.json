@@ -1,0 +1,9 @@
+{
+  "name": "opentasks",
+  "private": true,
+  "packageManager": "pnpm@10.6.3",
+  "scripts": {
+    "dev": "pnpm --filter @opentasks/server dev",
+    "typecheck": "pnpm --filter @opentasks/server typecheck"
+  }
+}

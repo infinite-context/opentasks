@@ -1,0 +1,9 @@
+{
+  "name": "@opentasks/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}
