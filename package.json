@@ -1,9 +1,11 @@
 {
   "name": "opentasks",
   "private": true,
-  "packageManager": "pnpm@10.6.3",
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "corepack pnpm --filter @opentasks/server dev",
-    "typecheck": "corepack pnpm --filter @opentasks/server typecheck"
+    "dev": "npm run dev --workspace=@opentasks/server",
+    "typecheck": "npm run typecheck --workspace=@opentasks/server"
   }
 }
