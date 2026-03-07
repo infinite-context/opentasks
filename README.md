@@ -22,6 +22,21 @@ Agents perform well in isolated, single-shot tasks. However, on large projects a
 
 `opentasks` operates through two interconnected loops:
 
+At a high level, the interaction looks like this:
+
+```text
+Agent -> request task
+System -> return hydrated task
+
+Agent -> do work
+Agent -> submit completed run
+
+System -> learn from run
+System -> improve next task
+```
+
+That is the core interaction model of the system.
+
 ### 1. The Execution Loop (Doing the work)
 1. An external agent requests work via the **MCP Server**.
 2. The **Task Orchestrator** pulls an available task from the PostgreSQL database.
