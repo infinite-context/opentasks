@@ -4,11 +4,14 @@ export interface TaskRequest {
   taskHint: string;
 }
 
+export type TaskStatus = "available" | "assigned";
+
 export interface TaskRecord {
   id: string;
   title: string;
   projectId: string;
-  status: "available" | "assigned";
+  status: TaskStatus;
+  assignedTo?: string;
 }
 
 export interface ContextPacket {

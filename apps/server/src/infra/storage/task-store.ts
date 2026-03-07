@@ -1,5 +1,5 @@
 import type { TaskRecord } from "../../shared/types";
 
-export interface TaskListManager {
+export interface TaskStore {
   claimNextTask(projectId: string, agentName: string): Promise<TaskRecord | null>;
 }

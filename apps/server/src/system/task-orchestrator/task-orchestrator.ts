@@ -22,7 +22,16 @@ export function createTaskOrchestrator({
         "Task orchestrator requests available work from the task list manager."
       );
 
-      const task = await taskListManager.selectAvailableTask(request.projectId);
+      const task = await taskListManager.claimNextTask(request.projectId, request.agentName);
+
+      if (!task) {
+        logger.step(
+          "task-orchestrator",
+          `Task orchestrator found no available task for project "${request.projectId}".`
+        );
+
+        return null;
+      }
 
       logger.step(
         "task-orchestrator",
