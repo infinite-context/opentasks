@@ -1,18 +1,13 @@
+import { Pool } from "pg";
 import { loadEnv } from "./infra/config";
 import { createLogger } from "./infra/logging";
-import { createOpenRouterProvider } from "./infra/providers/openrouter-provider";
 import { createInMemoryTaskStore } from "./infra/storage/in-memory-task-store";
-import { createVectorDatabase } from "./infra/storage/vector-database";
-import type { CompletedRun, HydratedTask, TaskRequest } from "./shared/types";
-import { createContextHydrator } from "./system/context-hydrator";
+import { createPostgresTaskDatabase } from "./infra/storage/postgres-task-database";
+import { applyPostgresSchema, seedPostgresDemoData } from "./infra/storage/postgres-schema";
 import { createExecutionLoop } from "./system/execution-loop";
-import { createIndexer } from "./system/indexer";
-import { createInternalAgent } from "./system/internal-agent";
-import { createLearningLoop } from "./system/learning-loop";
-import { createModelProviderService } from "./system/model-provider-service";
 import { createTaskListManager } from "./system/task-list-manager";
 import { createTaskOrchestrator } from "./system/task-orchestrator";
-import { createVectorSearchEngine } from "./system/vector-search-engine";
+import { createTaskRuntimeService } from "./system/task-runtime-service";
 import { createMcpTransport } from "./transport/mcp";
 
 export interface App {
@@ -22,61 +17,75 @@ export interface App {
 export function createApp(): App {
   const env = loadEnv();
   const logger = createLogger();
-
-  const taskStore = createInMemoryTaskStore({ logger });
-  const vectorDatabase = createVectorDatabase({ logger });
-  const externalModelProvider = createOpenRouterProvider({ logger });
+  const pool =
+    env.storageDriver === "postgres" && env.databaseUrl
+      ? new Pool({ connectionString: env.databaseUrl })
+      : null;
+  const taskStore =
+    env.storageDriver === "postgres" && pool
+      ? createPostgresTaskDatabase({ logger, pool })
+      : createInMemoryTaskStore({ logger });
 
   const taskListManager = createTaskListManager({ logger, taskStore });
-  const vectorSearchEngine = createVectorSearchEngine({ logger, vectorDatabase });
-  const contextHydrator = createContextHydrator({ logger, vectorSearchEngine });
   const taskOrchestrator = createTaskOrchestrator({
     logger,
     taskListManager,
-    contextHydrator
+    defaultLeaseDurationSeconds: env.defaultLeaseDurationSeconds
   });
-
-  const modelProviderService = createModelProviderService({
+  const executionLoop = createExecutionLoop({ logger, taskOrchestrator });
+  const taskRuntimeService = createTaskRuntimeService({
     logger,
-    provider: externalModelProvider
+    taskStore,
+    defaultLeaseDurationSeconds: env.defaultLeaseDurationSeconds
   });
-  const internalAgent = createInternalAgent({ logger, modelProviderService });
-  const indexer = createIndexer({ logger, internalAgent, vectorDatabase });
-  const mcpTransport = createMcpTransport({ logger });
-
-  const executionLoop = createExecutionLoop({ logger, mcpTransport, taskOrchestrator });
-  const learningLoop = createLearningLoop({ logger, mcpTransport, indexer });
+  const mcpTransport = createMcpTransport({
+    logger,
+    appName: env.appName,
+    appVersion: env.appVersion,
+    executionLoop,
+    taskRuntimeService
+  });
 
   return {
     async run(): Promise<void> {
       logger.section("Bootstrap");
-      logger.info("bootstrap", `Starting ${env.appName} runnable skeleton.`);
+      logger.info("bootstrap", `Starting ${env.appName} backend in ${env.environment} mode.`);
+      logger.info("bootstrap", `Using ${env.storageDriver} task storage.`);
 
-      const request: TaskRequest = {
-        agentName: env.defaultAgentName,
-        projectId: env.defaultProjectId,
-        taskHint: "Prepare the next task with hydrated context."
-      };
+      if (pool) {
+        if (env.autoMigrate) {
+          await applyPostgresSchema(pool, logger);
+        }
 
-      const hydratedTask: HydratedTask | null = await executionLoop.run(request);
+        if (env.seedDemoData) {
+          await seedPostgresDemoData(pool, logger);
+        }
+      }
 
-      if (!hydratedTask) {
-        logger.section("Done");
-        logger.info("bootstrap", "Runnable skeleton completed with no available task.");
+      await mcpTransport.start();
+      logger.info("bootstrap", "OpenTasks MCP server is ready for task lifecycle requests.");
+
+      await waitForShutdownSignal();
+      await mcpTransport.close();
+      await pool?.end();
+    }
+  };
+}
+
+async function waitForShutdownSignal(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let settled = false;
+
+    const handleSignal = (): void => {
+      if (settled) {
         return;
       }
 
-      const completedRun: CompletedRun = {
-        taskId: hydratedTask.id,
-        projectId: hydratedTask.projectId,
-        summary: `Completed placeholder task: ${hydratedTask.title}`,
-        outcome: "success"
-      };
+      settled = true;
+      resolve();
+    };
 
-      await learningLoop.run(completedRun);
-
-      logger.section("Done");
-      logger.info("bootstrap", "Runnable skeleton completed.");
-    }
-  };
+    process.once("SIGINT", handleSignal);
+    process.once("SIGTERM", handleSignal);
+  });
 }

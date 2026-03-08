@@ -1,19 +1,18 @@
 import type { Logger } from "../../infra/logging";
-import type { TaskRequest } from "../../shared/types";
-import type { ContextHydrator } from "../context-hydrator";
+import type { TaskRequest } from "../../shared/dtos";
 import type { TaskListManager } from "../task-list-manager";
 import type { TaskOrchestrator } from "./types";
 
 interface CreateTaskOrchestratorParams {
   logger: Logger;
   taskListManager: TaskListManager;
-  contextHydrator: ContextHydrator;
+  defaultLeaseDurationSeconds: number;
 }
 
 export function createTaskOrchestrator({
   logger,
   taskListManager,
-  contextHydrator
+  defaultLeaseDurationSeconds
 }: CreateTaskOrchestratorParams): TaskOrchestrator {
   return {
     async prepareTask(request: TaskRequest) {
@@ -22,7 +21,11 @@ export function createTaskOrchestrator({
         "Task orchestrator requests available work from the task list manager."
       );
 
-      const task = await taskListManager.claimNextTask(request.projectId, request.agentName);
+      const task = await taskListManager.claimNextTask(request.projectId, request.agentName, {
+        taskHint: request.taskHint,
+        capabilities: request.capabilities,
+        leaseDurationSeconds: request.leaseDurationSeconds ?? defaultLeaseDurationSeconds
+      });
 
       if (!task) {
         logger.step(
@@ -35,10 +38,10 @@ export function createTaskOrchestrator({
 
       logger.step(
         "task-orchestrator",
-        `Task orchestrator passes task \"${task.id}\" to the context hydrator.`
+        `Task orchestrator returns claimed task "${task.id}" directly in phase one.`
       );
 
-      return contextHydrator.hydrateTask(task);
+      return task;
     }
   };
 }

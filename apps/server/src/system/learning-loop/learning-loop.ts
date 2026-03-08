@@ -1,7 +1,7 @@
 import type { Logger } from "../../infra/logging";
-import type { CompletedRun, MemoryArtifact } from "../../shared/types";
+import type { MemoryArtifact } from "../../shared/types";
+import type { CompletedRun } from "../../shared/dtos";
 import type { Indexer } from "../indexer";
-import type { McpTransport } from "../../transport/mcp";
 
 export interface LearningLoop {
   run(run: CompletedRun): Promise<MemoryArtifact[]>;
@@ -9,23 +9,18 @@ export interface LearningLoop {
 
 interface CreateLearningLoopParams {
   logger: Logger;
-  mcpTransport: McpTransport;
   indexer: Indexer;
 }
 
 export function createLearningLoop({
   logger,
-  mcpTransport,
   indexer
 }: CreateLearningLoopParams): LearningLoop {
   return {
     async run(completedRun: CompletedRun): Promise<MemoryArtifact[]> {
       logger.section("Learning Loop");
-
-      const run = await mcpTransport.receiveCompletedRun(completedRun);
-
-      logger.step("learning-loop", "MCP server forwards the completed run context to the indexer.");
-      const artifacts = await indexer.processCompletedRun(run);
+      logger.step("learning-loop", "Learning loop forwards completed run context to the indexer.");
+      const artifacts = await indexer.processCompletedRun(completedRun);
 
       logger.step(
         "learning-loop",

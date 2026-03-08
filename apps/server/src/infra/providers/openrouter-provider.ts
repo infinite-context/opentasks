@@ -1,5 +1,5 @@
 import type { Logger } from "../logging";
-import type { ModelRequest, ModelResponse } from "../../shared/types";
+import type { ModelRequest, ModelResponse } from "../../shared/dtos";
 import type { ExternalModelProvider } from "./external-model-provider";
 
 interface CreateOpenRouterProviderParams {

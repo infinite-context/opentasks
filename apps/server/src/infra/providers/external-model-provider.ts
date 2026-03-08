@@ -1,4 +1,4 @@
-import type { ModelRequest, ModelResponse } from "../../shared/types";
+import type { ModelRequest, ModelResponse } from "../../shared/dtos";
 
 export interface ExternalModelProvider {
   readonly name: string;

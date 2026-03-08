@@ -1,6 +1,6 @@
 import type { Logger } from "../../infra/logging";
 import type { ExternalModelProvider } from "../../infra/providers/external-model-provider";
-import type { ModelRequest, ModelResponse } from "../../shared/types";
+import type { ModelRequest, ModelResponse } from "../../shared/dtos";
 import type { ModelProviderService } from "./types";
 
 interface CreateModelProviderServiceParams {

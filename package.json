@@ -6,6 +6,8 @@
   ],
   "scripts": {
     "dev": "npm --workspace=@opentasks/server --silent run dev",
-    "typecheck": "npm --workspace=@opentasks/server --silent run typecheck"
+    "dev:web": "npm --workspace=@opentasks/web --silent run dev",
+    "build:web": "npm --workspace=@opentasks/web --silent run build",
+    "typecheck": "npm --workspace=@opentasks/server --silent run typecheck && npm --workspace=@opentasks/web --silent run typecheck"
   }
 }

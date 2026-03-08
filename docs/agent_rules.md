@@ -146,6 +146,18 @@ Not allowed:
 
 If shared contracts need to be reused by multiple apps, promote them into `packages/contracts`.
 
+### Shared contract split
+
+Inside an app, `shared` should be split by responsibility rather than treated as a single contract file.
+
+Use:
+
+- `shared/primitives.ts` for structural base interfaces such as `IdentityModel` and `AuditableModel`
+- `shared/types.ts` for persisted or domain-facing entity/state contracts
+- `shared/dtos.ts` for transport-facing DTOs, command payloads, and non-persisted request/response contracts
+
+Rule: if a shape represents stored entity state, it belongs in `types.ts`. If a shape represents input/output across a boundary, it belongs in `dtos.ts`.
+
 ## Dependency rules
 
 Dependencies must move inward toward business logic through interfaces, not outward through implementation leakage.
@@ -275,6 +287,10 @@ Contracts must be stable and intentional.
 
 Rule: do not pass raw vendor SDK objects across layers.
 
+Rule: persisted models should extend at least `IdentityModel`. Persisted models with lifecycle timestamps should extend `AuditableModel`.
+
+Rule: request objects, mutation payloads, and transport responses should be modeled as DTOs rather than entity types.
+
 Rule: if a type crosses more than one app boundary, move it into `packages/contracts` and back it with runtime validation when appropriate.
 
 ## Composition rules
@@ -307,6 +323,8 @@ Guidelines:
 - return domain-relevant contracts, not raw database rows
 - isolate migration or driver-specific code from orchestration code
 - use one adapter per responsibility where practical
+- let the database generate persisted identifiers on insert and hydrate the created model from the returned row
+- use prefixed object identifiers for persisted records, following the Stripe-style pattern such as `task_<id>` or `project_<id>`
 
 Examples:
 
