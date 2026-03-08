@@ -1,7 +1,7 @@
 import type { Logger } from "../../infra/logging";
 import type { VectorDatabase } from "../../infra/storage/vector-database";
-import type { MemoryArtifact } from "../../shared/types";
-import type { CompletedRun } from "../../shared/dtos";
+import type { MemoryArtifact } from "@opentasks/contracts";
+import type { CompletedRun } from "@opentasks/contracts";
 import type { InternalAgent } from "../internal-agent";
 import type { Indexer } from "./types";
 

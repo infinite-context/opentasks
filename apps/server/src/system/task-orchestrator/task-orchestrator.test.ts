@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { createTaskOrchestrator } from "./task-orchestrator";
 import type { Logger } from "../../infra/logging";
-import type { ClaimedTask } from "../../shared/types";
-import type { TaskClaimOptions, TaskRequest } from "../../shared/dtos";
+import type { ClaimedTask } from "@opentasks/contracts";
+import type { TaskClaimOptions, TaskRequest } from "@opentasks/contracts";
 import type { TaskListManager } from "../task-list-manager";
 
 const logger: Logger = {

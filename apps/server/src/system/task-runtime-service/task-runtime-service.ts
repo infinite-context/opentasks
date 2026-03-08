@@ -1,6 +1,6 @@
 import type { Logger } from "../../infra/logging";
 import type { TaskStore } from "../../infra/storage/task-store";
-import type { CreateTaskInput, TaskCompletion, TaskFailure, TaskRelease } from "../../shared/dtos";
+import type { CreateTaskInput, TaskCompletion, TaskFailure, TaskRelease } from "@opentasks/contracts";
 import type { TaskRuntimeService } from "./types";
 
 interface CreateTaskRuntimeServiceParams {

@@ -1,5 +1,5 @@
 import type { Logger } from "../logging";
-import type { MemoryArtifact } from "../../shared/types";
+import type { MemoryArtifact } from "@opentasks/contracts";
 
 export interface VectorDatabase {
   search(taskId: string): Promise<string[]>;

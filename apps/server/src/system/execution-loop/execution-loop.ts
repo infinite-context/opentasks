@@ -1,6 +1,6 @@
 import type { Logger } from "../../infra/logging";
-import type { ClaimedTask } from "../../shared/types";
-import type { TaskRequest } from "../../shared/dtos";
+import type { ClaimedTask } from "@opentasks/contracts";
+import type { TaskRequest } from "@opentasks/contracts";
 import type { TaskOrchestrator } from "../task-orchestrator";
 
 export interface ExecutionLoop {

@@ -9,7 +9,7 @@ import type {
   TaskRecord,
   TaskSource,
   TaskStatus
-} from "../../shared/types";
+} from "@opentasks/contracts";
 import type {
   CreateTaskInput,
   TaskClaimOptions,
@@ -17,97 +17,28 @@ import type {
   TaskFailure,
   TaskQueryFilters,
   TaskRelease
-} from "../../shared/dtos";
+} from "@opentasks/contracts";
 import type { TaskStore } from "./task-store";
 import type { Database } from "better-sqlite3";
 import { generateId } from "./sqlite-schema";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { eq, or, and, isNull, lte, notExists, asc, desc, inArray, sql } from "drizzle-orm";
+import * as schema from "./schema";
 
 interface CreateSqliteTaskDatabaseParams {
   logger: Logger;
   db: Database;
 }
 
-interface TaskRow {
-  id: string;
-  project_id: string;
-  title: string;
-  description: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  available_at: string | null;
-  assigned_to: string | null;
-  assigned_at: string | null;
-  lease_expires_at: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  failed_at: string | null;
-  blocked_reason: string | null;
-  last_error: string | null;
-  source: TaskSource;
-  metadata_json: string;
-  created_at: string;
-  updated_at: string;
-  dependency_ids: string | null;
-}
-
-interface ProjectRow {
-  id: string;
-  key: string;
-  name: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface TaskEventRow {
-  id: string;
-  task_id: string;
-  project_id: string;
-  event_type: TaskEventType;
-  actor_type: TaskEventActorType;
-  actor_id: string | null;
-  payload_json: string;
-  created_at: string;
-}
-
-const SELECT_TASK_COLUMNS = `
-  SELECT
-    t.id,
-    t.project_id,
-    t.title,
-    t.description,
-    t.status,
-    t.priority,
-    t.available_at,
-    t.assigned_to,
-    t.assigned_at,
-    t.lease_expires_at,
-    t.started_at,
-    t.completed_at,
-    t.failed_at,
-    t.blocked_reason,
-    t.last_error,
-    t.source,
-    t.metadata_json,
-    t.created_at,
-    t.updated_at,
-    COALESCE(
-      (
-        SELECT json_group_array(td.depends_on_task_id)
-        FROM task_dependencies td
-        WHERE td.task_id = t.id
-      ),
-      '[]'
-    ) AS dependency_ids
-  FROM tasks t
-`;
-
 export function createSqliteTaskDatabase({
   logger,
-  db
+  db: sqliteDb
 }: CreateSqliteTaskDatabaseParams): TaskStore {
+  const db = drizzle(sqliteDb, { schema });
+
   return {
     async createTask(input: CreateTaskInput): Promise<TaskRecord | null> {
-      return db.transaction(() => {
+      return sqliteDb.transaction(() => {
         const project = getProjectByIdOrKeyFromDb(db, input.projectId);
         if (!project) {
           logger.step(
@@ -119,34 +50,24 @@ export function createSqliteTaskDatabase({
 
         const taskId = generateId("task");
 
-        db.prepare(`
-          INSERT INTO tasks (
-            id,
-            project_id,
-            title,
-            description,
-            status,
-            priority,
-            available_at,
-            source
-          )
-          VALUES (?, ?, ?, ?, 'available', ?, datetime('now'), 'manual')
-        `).run(
-          taskId,
-          project.id,
-          input.title,
-          input.description ?? "",
-          input.priority ?? "P2"
-        );
+        db.insert(schema.tasks).values({
+          id: taskId,
+          projectId: project.id,
+          title: input.title,
+          description: input.description ?? "",
+          status: 'available',
+          priority: input.priority ?? "P2",
+          availableAt: sql`datetime('now')`,
+          source: 'manual',
+        }).run();
 
         const dependencyIds = input.dependencyIds ?? [];
-        const insertDep = db.prepare(`
-          INSERT INTO task_dependencies (task_id, depends_on_task_id)
-          VALUES (?, ?)
-          ON CONFLICT DO NOTHING
-        `);
-        for (const depId of dependencyIds) {
-          insertDep.run(taskId, depId);
+        if (dependencyIds.length > 0) {
+          const depValues = dependencyIds.map(depId => ({
+            taskId,
+            dependsOnTaskId: depId
+          }));
+          db.insert(schema.taskDependencies).values(depValues).onConflictDoNothing().run();
         }
 
         insertTaskEvent(db, {
@@ -184,7 +105,7 @@ export function createSqliteTaskDatabase({
         `SQLite task store looks for the next available task in project "${projectId}".`
       );
 
-      return db.transaction(() => {
+      return sqliteDb.transaction(() => {
         const resolvedProjectId = resolveProjectIdFromDb(db, projectId);
         if (!resolvedProjectId) {
           return null;
@@ -192,7 +113,7 @@ export function createSqliteTaskDatabase({
 
         requeueExpiredTasksInTransaction(db, resolvedProjectId);
 
-        const candidate = db.prepare(`
+        const candidateRaw = sqliteDb.prepare(`
           SELECT t.id
           FROM tasks t
           WHERE t.project_id = ?
@@ -217,25 +138,25 @@ export function createSqliteTaskDatabase({
           LIMIT 1
         `).get(resolvedProjectId) as { id: string } | undefined;
 
-        if (!candidate) {
+        if (!candidateRaw) {
           return null;
         }
 
-        db.prepare(`
-          UPDATE tasks
-          SET
-            status = 'assigned',
-            assigned_to = ?,
-            assigned_at = datetime('now'),
-            lease_expires_at = datetime('now', '+' || ? || ' seconds'),
-            updated_at = datetime('now'),
-            blocked_reason = NULL,
-            last_error = NULL
-          WHERE id = ?
-        `).run(agentName, options.leaseDurationSeconds, candidate.id);
+        db.update(schema.tasks)
+          .set({
+            status: 'assigned',
+            assignedTo: agentName,
+            assignedAt: sql`datetime('now')`,
+            leaseExpiresAt: sql`datetime('now', '+' || ${options.leaseDurationSeconds} || ' seconds')`,
+            updatedAt: sql`datetime('now')`,
+            blockedReason: null,
+            lastError: null
+          })
+          .where(eq(schema.tasks.id, candidateRaw.id))
+          .run();
 
         insertTaskEvent(db, {
-          taskId: candidate.id,
+          taskId: candidateRaw.id,
           projectId: resolvedProjectId,
           eventType: "task_claimed",
           actorType: "agent",
@@ -247,7 +168,7 @@ export function createSqliteTaskDatabase({
           }
         });
 
-        return getTaskByIdFromDb(db, candidate.id) as ClaimedTask | null;
+        return getTaskByIdFromDb(db, candidateRaw.id) as ClaimedTask | null;
       })();
     },
     async getProject(projectId: string): Promise<ProjectRecord | null> {
@@ -257,63 +178,59 @@ export function createSqliteTaskDatabase({
       return getTaskByIdFromDb(db, taskId);
     },
     async listTasks(filters?: TaskQueryFilters): Promise<TaskRecord[]> {
-      const clauses: string[] = [];
-      const values: unknown[] = [];
+      const conditions = [];
       const projectId = filters?.projectId ? resolveProjectIdFromDb(db, filters.projectId) : null;
 
       if (filters?.projectId) {
-        if (!projectId) {
-          return [];
-        }
-
-        values.push(projectId);
-        clauses.push(`t.project_id = ?`);
+        if (!projectId) return [];
+        conditions.push(eq(schema.tasks.projectId, projectId));
       }
 
       if (filters?.assignedTo) {
-        values.push(filters.assignedTo);
-        clauses.push(`t.assigned_to = ?`);
+        conditions.push(eq(schema.tasks.assignedTo, filters.assignedTo));
       }
 
       if (filters?.status && filters.status.length > 0) {
-        const placeholders = filters.status.map(() => "?").join(",");
-        values.push(...filters.status);
-        clauses.push(`t.status IN (${placeholders})`);
+        conditions.push(inArray(schema.tasks.status, filters.status));
       }
 
-      const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-      const limitClause = filters?.limit ? `LIMIT ${filters.limit}` : "";
+      let query = db.select({
+        task: schema.tasks,
+        dependencyIds: sql<string>`COALESCE((SELECT json_group_array(td.depends_on_task_id) FROM task_dependencies td WHERE td.task_id = tasks.id), '[]')`
+      })
+      .from(schema.tasks)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(schema.tasks.updatedAt))
+      .$dynamic();
 
-      const rows = db.prepare(`
-        ${SELECT_TASK_COLUMNS}
-        ${whereClause}
-        ORDER BY t.updated_at DESC
-        ${limitClause}
-      `).all(...values) as TaskRow[];
+      if (filters?.limit) {
+        query = query.limit(filters.limit);
+      }
 
-      return rows.map(mapTaskRow);
+      const rows = query.all();
+      return rows.map(row => mapTaskRow(row.task, row.dependencyIds));
     },
     async markTaskInProgress(taskId: string, agentName: string): Promise<TaskRecord | null> {
-      return db.transaction(() => {
-        const result = db.prepare(`
-          UPDATE tasks
-          SET
-            status = 'in_progress',
-            started_at = COALESCE(started_at, datetime('now')),
-            updated_at = datetime('now')
-          WHERE id = ?
-            AND assigned_to = ?
-            AND status IN ('assigned', 'in_progress')
-          RETURNING id, project_id
-        `).get(taskId, agentName) as { id: string; project_id: string } | undefined;
+      return sqliteDb.transaction(() => {
+        const result = db.update(schema.tasks)
+          .set({
+            status: 'in_progress',
+            startedAt: sql`COALESCE(started_at, datetime('now'))`,
+            updatedAt: sql`datetime('now')`
+          })
+          .where(and(
+            eq(schema.tasks.id, taskId),
+            eq(schema.tasks.assignedTo, agentName),
+            inArray(schema.tasks.status, ['assigned', 'in_progress'])
+          ))
+          .returning({ id: schema.tasks.id, projectId: schema.tasks.projectId })
+          .get();
 
-        if (!result) {
-          return null;
-        }
+        if (!result) return null;
 
         insertTaskEvent(db, {
           taskId,
-          projectId: result.project_id,
+          projectId: result.projectId,
           eventType: "task_started",
           actorType: "agent",
           actorId: agentName,
@@ -328,35 +245,35 @@ export function createSqliteTaskDatabase({
       agentName: string,
       completion: TaskCompletion
     ): Promise<TaskRecord | null> {
-      return db.transaction(() => {
+      return sqliteDb.transaction(() => {
         const payload = JSON.stringify({
           completionSummary: completion.summary,
           completionMetadata: completion.metadata ?? {}
         });
 
-        const result = db.prepare(`
-          UPDATE tasks
-          SET
-            status = 'completed',
-            completed_at = datetime('now'),
-            updated_at = datetime('now'),
-            lease_expires_at = NULL,
-            blocked_reason = NULL,
-            last_error = NULL,
-            metadata_json = json_patch(metadata_json, ?)
-          WHERE id = ?
-            AND assigned_to = ?
-            AND status IN ('assigned', 'in_progress')
-          RETURNING id, project_id
-        `).get(payload, taskId, agentName) as { id: string; project_id: string } | undefined;
+        const result = db.update(schema.tasks)
+          .set({
+            status: 'completed',
+            completedAt: sql`datetime('now')`,
+            updatedAt: sql`datetime('now')`,
+            leaseExpiresAt: null,
+            blockedReason: null,
+            lastError: null,
+            metadataJson: sql`json_patch(metadata_json, ${payload})`
+          })
+          .where(and(
+            eq(schema.tasks.id, taskId),
+            eq(schema.tasks.assignedTo, agentName),
+            inArray(schema.tasks.status, ['assigned', 'in_progress'])
+          ))
+          .returning({ id: schema.tasks.id, projectId: schema.tasks.projectId })
+          .get();
 
-        if (!result) {
-          return null;
-        }
+        if (!result) return null;
 
         insertTaskEvent(db, {
           taskId,
-          projectId: result.project_id,
+          projectId: result.projectId,
           eventType: "task_completed",
           actorType: "agent",
           actorId: agentName,
@@ -370,33 +287,33 @@ export function createSqliteTaskDatabase({
       })();
     },
     async failTask(taskId: string, agentName: string, failure: TaskFailure): Promise<TaskRecord | null> {
-      return db.transaction(() => {
+      return sqliteDb.transaction(() => {
         const payload = JSON.stringify({
           failureMetadata: failure.metadata ?? {}
         });
 
-        const result = db.prepare(`
-          UPDATE tasks
-          SET
-            status = 'failed',
-            failed_at = datetime('now'),
-            updated_at = datetime('now'),
-            lease_expires_at = NULL,
-            last_error = ?,
-            metadata_json = json_patch(metadata_json, ?)
-          WHERE id = ?
-            AND assigned_to = ?
-            AND status IN ('assigned', 'in_progress')
-          RETURNING id, project_id
-        `).get(failure.error, payload, taskId, agentName) as { id: string; project_id: string } | undefined;
+        const result = db.update(schema.tasks)
+          .set({
+            status: 'failed',
+            failedAt: sql`datetime('now')`,
+            updatedAt: sql`datetime('now')`,
+            leaseExpiresAt: null,
+            lastError: failure.error,
+            metadataJson: sql`json_patch(metadata_json, ${payload})`
+          })
+          .where(and(
+            eq(schema.tasks.id, taskId),
+            eq(schema.tasks.assignedTo, agentName),
+            inArray(schema.tasks.status, ['assigned', 'in_progress'])
+          ))
+          .returning({ id: schema.tasks.id, projectId: schema.tasks.projectId })
+          .get();
 
-        if (!result) {
-          return null;
-        }
+        if (!result) return null;
 
         insertTaskEvent(db, {
           taskId,
-          projectId: result.project_id,
+          projectId: result.projectId,
           eventType: "task_failed",
           actorType: "agent",
           actorId: agentName,
@@ -410,31 +327,31 @@ export function createSqliteTaskDatabase({
       })();
     },
     async releaseTask(taskId: string, agentName: string, release: TaskRelease): Promise<TaskRecord | null> {
-      return db.transaction(() => {
-        const result = db.prepare(`
-          UPDATE tasks
-          SET
-            status = 'available',
-            assigned_to = NULL,
-            assigned_at = NULL,
-            lease_expires_at = NULL,
-            started_at = NULL,
-            updated_at = datetime('now'),
-            available_at = datetime('now'),
-            last_error = ?
-          WHERE id = ?
-            AND assigned_to = ?
-            AND status IN ('assigned', 'in_progress')
-          RETURNING id, project_id
-        `).get(release.reason, taskId, agentName) as { id: string; project_id: string } | undefined;
+      return sqliteDb.transaction(() => {
+        const result = db.update(schema.tasks)
+          .set({
+            status: 'available',
+            assignedTo: null,
+            assignedAt: null,
+            leaseExpiresAt: null,
+            startedAt: null,
+            updatedAt: sql`datetime('now')`,
+            availableAt: sql`datetime('now')`,
+            lastError: release.reason
+          })
+          .where(and(
+            eq(schema.tasks.id, taskId),
+            eq(schema.tasks.assignedTo, agentName),
+            inArray(schema.tasks.status, ['assigned', 'in_progress'])
+          ))
+          .returning({ id: schema.tasks.id, projectId: schema.tasks.projectId })
+          .get();
 
-        if (!result) {
-          return null;
-        }
+        if (!result) return null;
 
         insertTaskEvent(db, {
           taskId,
-          projectId: result.project_id,
+          projectId: result.projectId,
           eventType: "task_released",
           actorType: "agent",
           actorId: agentName,
@@ -452,25 +369,25 @@ export function createSqliteTaskDatabase({
       agentName: string,
       leaseDurationSeconds: number
     ): Promise<TaskRecord | null> {
-      return db.transaction(() => {
-        const result = db.prepare(`
-          UPDATE tasks
-          SET
-            lease_expires_at = datetime('now', '+' || ? || ' seconds'),
-            updated_at = datetime('now')
-          WHERE id = ?
-            AND assigned_to = ?
-            AND status IN ('assigned', 'in_progress')
-          RETURNING id, project_id
-        `).get(leaseDurationSeconds, taskId, agentName) as { id: string; project_id: string } | undefined;
+      return sqliteDb.transaction(() => {
+        const result = db.update(schema.tasks)
+          .set({
+            leaseExpiresAt: sql`datetime('now', '+' || ${leaseDurationSeconds} || ' seconds')`,
+            updatedAt: sql`datetime('now')`
+          })
+          .where(and(
+            eq(schema.tasks.id, taskId),
+            eq(schema.tasks.assignedTo, agentName),
+            inArray(schema.tasks.status, ['assigned', 'in_progress'])
+          ))
+          .returning({ id: schema.tasks.id, projectId: schema.tasks.projectId })
+          .get();
 
-        if (!result) {
-          return null;
-        }
+        if (!result) return null;
 
         insertTaskEvent(db, {
           taskId,
-          projectId: result.project_id,
+          projectId: result.projectId,
           eventType: "task_heartbeat",
           actorType: "agent",
           actorId: agentName,
@@ -483,165 +400,145 @@ export function createSqliteTaskDatabase({
       })();
     },
     async requeueExpiredTasks(projectId?: string): Promise<number> {
-      return db.transaction(() => {
+      return sqliteDb.transaction(() => {
         const resolvedProjectId = projectId ? resolveProjectIdFromDb(db, projectId) : undefined;
         return requeueExpiredTasksInTransaction(db, resolvedProjectId ?? undefined);
       })();
     },
     async listTaskEvents(taskId: string): Promise<TaskEvent[]> {
-      const rows = db.prepare(`
-        SELECT
-          id,
-          task_id,
-          project_id,
-          event_type,
-          actor_type,
-          actor_id,
-          payload_json,
-          created_at
-        FROM task_events
-        WHERE task_id = ?
-        ORDER BY created_at ASC
-      `).all(taskId) as TaskEventRow[];
+      const rows = db.select()
+        .from(schema.taskEvents)
+        .where(eq(schema.taskEvents.taskId, taskId))
+        .orderBy(asc(schema.taskEvents.createdAt))
+        .all();
 
-      return rows.map((row) => ({
+      return rows.map(row => ({
         id: row.id,
-        taskId: row.task_id,
-        projectId: row.project_id,
-        eventType: row.event_type,
-        actorType: row.actor_type,
-        actorId: row.actor_id,
-        payload: JSON.parse(row.payload_json),
-        createdAt: row.created_at
+        taskId: row.taskId,
+        projectId: row.projectId,
+        eventType: row.eventType as TaskEventType,
+        actorType: row.actorType as TaskEventActorType,
+        actorId: row.actorId,
+        payload: JSON.parse(row.payloadJson),
+        createdAt: row.createdAt
       }));
     },
     async listProjectTaskEvents(projectId: string, limit = 20): Promise<TaskEvent[]> {
       const resolvedProjectId = resolveProjectIdFromDb(db, projectId);
-      if (!resolvedProjectId) {
-        return [];
-      }
+      if (!resolvedProjectId) return [];
 
-      const rows = db.prepare(`
-        SELECT
-          id,
-          task_id,
-          project_id,
-          event_type,
-          actor_type,
-          actor_id,
-          payload_json,
-          created_at
-        FROM task_events
-        WHERE project_id = ?
-        ORDER BY created_at DESC
-        LIMIT ?
-      `).all(resolvedProjectId, limit) as TaskEventRow[];
+      const rows = db.select()
+        .from(schema.taskEvents)
+        .where(eq(schema.taskEvents.projectId, resolvedProjectId))
+        .orderBy(desc(schema.taskEvents.createdAt))
+        .limit(limit)
+        .all();
 
-      return rows.map((row) => ({
+      return rows.map(row => ({
         id: row.id,
-        taskId: row.task_id,
-        projectId: row.project_id,
-        eventType: row.event_type,
-        actorType: row.actor_type,
-        actorId: row.actor_id,
-        payload: JSON.parse(row.payload_json),
-        createdAt: row.created_at
+        taskId: row.taskId,
+        projectId: row.projectId,
+        eventType: row.eventType as TaskEventType,
+        actorType: row.actorType as TaskEventActorType,
+        actorId: row.actorId,
+        payload: JSON.parse(row.payloadJson),
+        createdAt: row.createdAt
       }));
     }
   };
 }
 
-function getTaskByIdFromDb(db: Database, taskId: string): TaskRecord | null {
-  const row = db.prepare(`
-    ${SELECT_TASK_COLUMNS}
-    WHERE t.id = ?
-  `).get(taskId) as TaskRow | undefined;
+function getTaskByIdFromDb(db: any, taskId: string): TaskRecord | null {
+  const row = db.select({
+    task: schema.tasks,
+    dependencyIds: sql<string>`COALESCE((SELECT json_group_array(td.depends_on_task_id) FROM task_dependencies td WHERE td.task_id = tasks.id), '[]')`
+  })
+  .from(schema.tasks)
+  .where(eq(schema.tasks.id, taskId))
+  .get();
 
-  return row ? mapTaskRow(row) : null;
+  return row ? mapTaskRow(row.task, row.dependencyIds) : null;
 }
 
-function resolveProjectIdFromDb(db: Database, projectRef: string): string | null {
+function resolveProjectIdFromDb(db: any, projectRef: string): string | null {
   const project = getProjectByIdOrKeyFromDb(db, projectRef);
   return project?.id ?? null;
 }
 
-function getProjectByIdOrKeyFromDb(db: Database, projectRef: string): ProjectRecord | null {
-  const row = db.prepare(`
-    SELECT id, key, name, created_at, updated_at
-    FROM projects
-    WHERE id = ? OR key = ?
-    LIMIT 1
-  `).get(projectRef, projectRef) as ProjectRow | undefined;
+function getProjectByIdOrKeyFromDb(db: any, projectRef: string): ProjectRecord | null {
+  const row = db.select()
+    .from(schema.projects)
+    .where(or(eq(schema.projects.id, projectRef), eq(schema.projects.key, projectRef)))
+    .limit(1)
+    .get();
 
-  if (!row) {
-    return null;
-  }
+  if (!row) return null;
 
   return {
     id: row.id,
     key: row.key,
     name: row.name,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
   };
 }
 
-function mapTaskRow(row: TaskRow): TaskRecord {
-  const deps = row.dependency_ids ? JSON.parse(row.dependency_ids) : [];
+function mapTaskRow(row: any, dependencyIdsJson: string): TaskRecord {
+  const deps = dependencyIdsJson ? JSON.parse(dependencyIdsJson) : [];
   
   return {
     id: row.id,
-    projectId: row.project_id,
+    projectId: row.projectId,
     title: row.title,
     description: row.description,
-    status: row.status,
-    priority: row.priority,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    availableAt: row.available_at ?? null,
-    assignedTo: row.assigned_to,
-    assignedAt: row.assigned_at ?? null,
-    leaseExpiresAt: row.lease_expires_at ?? null,
-    startedAt: row.started_at ?? null,
-    completedAt: row.completed_at ?? null,
-    failedAt: row.failed_at ?? null,
-    blockedReason: row.blocked_reason,
-    lastError: row.last_error,
-    source: row.source,
-    metadata: JSON.parse(row.metadata_json),
+    status: row.status as TaskStatus,
+    priority: row.priority as TaskPriority,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    availableAt: row.availableAt ?? null,
+    assignedTo: row.assignedTo,
+    assignedAt: row.assignedAt ?? null,
+    leaseExpiresAt: row.leaseExpiresAt ?? null,
+    startedAt: row.startedAt ?? null,
+    completedAt: row.completedAt ?? null,
+    failedAt: row.failedAt ?? null,
+    blockedReason: row.blockedReason,
+    lastError: row.lastError,
+    source: row.source as TaskSource,
+    metadata: JSON.parse(row.metadataJson),
     dependencyIds: Array.isArray(deps) ? deps : []
   };
 }
 
-function requeueExpiredTasksInTransaction(db: Database, projectId?: string): number {
-  const values: unknown[] = [];
-  const projectFilter = projectId ? `AND project_id = ?` : "";
+function requeueExpiredTasksInTransaction(db: any, projectId?: string): number {
+  const conditions = [
+    inArray(schema.tasks.status, ['assigned', 'in_progress']),
+    sql`${schema.tasks.leaseExpiresAt} IS NOT NULL`,
+    lte(schema.tasks.leaseExpiresAt, sql`datetime('now')`)
+  ];
 
   if (projectId) {
-    values.push(projectId);
+    conditions.push(eq(schema.tasks.projectId, projectId));
   }
 
-  const rows = db.prepare(`
-    UPDATE tasks
-    SET
-      status = 'available',
-      assigned_to = NULL,
-      assigned_at = NULL,
-      lease_expires_at = NULL,
-      started_at = NULL,
-      available_at = datetime('now'),
-      updated_at = datetime('now')
-    WHERE status IN ('assigned', 'in_progress')
-      AND lease_expires_at IS NOT NULL
-      AND lease_expires_at <= datetime('now')
-      ${projectFilter}
-    RETURNING id, project_id
-  `).all(...values) as { id: string; project_id: string }[];
+  const rows = db.update(schema.tasks)
+    .set({
+      status: 'available',
+      assignedTo: null,
+      assignedAt: null,
+      leaseExpiresAt: null,
+      startedAt: null,
+      availableAt: sql`datetime('now')`,
+      updatedAt: sql`datetime('now')`
+    })
+    .where(and(...conditions))
+    .returning({ id: schema.tasks.id, projectId: schema.tasks.projectId })
+    .all();
 
   for (const row of rows) {
     insertTaskEvent(db, {
       taskId: row.id,
-      projectId: row.project_id,
+      projectId: row.projectId,
       eventType: "task_requeued",
       actorType: "system",
       actorId: null,
@@ -653,7 +550,7 @@ function requeueExpiredTasksInTransaction(db: Database, projectId?: string): num
 }
 
 function insertTaskEvent(
-  db: Database,
+  db: any,
   event: {
     taskId: string;
     projectId: string;
@@ -663,24 +560,13 @@ function insertTaskEvent(
     payload: Record<string, unknown>;
   }
 ): void {
-  db.prepare(`
-    INSERT INTO task_events (
-      id,
-      task_id,
-      project_id,
-      event_type,
-      actor_type,
-      actor_id,
-      payload_json
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    generateId("task_event"),
-    event.taskId,
-    event.projectId,
-    event.eventType,
-    event.actorType,
-    event.actorId,
-    JSON.stringify(event.payload)
-  );
+  db.insert(schema.taskEvents).values({
+    id: generateId("task_event"),
+    taskId: event.taskId,
+    projectId: event.projectId,
+    eventType: event.eventType,
+    actorType: event.actorType,
+    actorId: event.actorId,
+    payloadJson: JSON.stringify(event.payload)
+  }).run();
 }

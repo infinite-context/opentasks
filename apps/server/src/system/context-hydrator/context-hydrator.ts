@@ -1,6 +1,6 @@
 import type { Logger } from "../../infra/logging";
-import type { TaskRecord } from "../../shared/types";
-import type { HydratedTask } from "../../shared/dtos";
+import type { TaskRecord } from "@opentasks/contracts";
+import type { HydratedTask } from "@opentasks/contracts";
 import type { VectorSearchEngine } from "../vector-search-engine";
 import type { ContextHydrator } from "./types";
 

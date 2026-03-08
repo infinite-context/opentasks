@@ -1,5 +1,5 @@
-import type { ClaimedTask } from "../../shared/types";
-import type { TaskClaimOptions } from "../../shared/dtos";
+import type { ClaimedTask } from "@opentasks/contracts";
+import type { TaskClaimOptions } from "@opentasks/contracts";
 
 export interface TaskListManager {
   claimNextTask(

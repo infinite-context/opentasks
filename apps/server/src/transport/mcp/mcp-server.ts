@@ -10,16 +10,14 @@ import {
   taskRequestSchema
 } from "@opentasks/contracts/schemas";
 import type { Logger } from "../../infra/logging";
-import type { ExecutionLoop } from "../../system/execution-loop";
-import type { TaskRuntimeService } from "../../system/task-runtime-service";
+import type { TaskService } from "../../system/task-service";
 import type { McpTransport } from "./types";
 
 interface CreateMcpTransportParams {
   logger: Logger;
   appName: string;
   appVersion: string;
-  executionLoop: ExecutionLoop;
-  taskRuntimeService: TaskRuntimeService;
+  taskService: TaskService;
 }
 
 const requestTaskSchema = taskRequestSchema.shape;
@@ -30,8 +28,7 @@ export function createMcpTransport({
   logger,
   appName,
   appVersion,
-  executionLoop,
-  taskRuntimeService
+  taskService
 }: CreateMcpTransportParams): McpTransport {
   const server = new McpServer(
     {
@@ -53,7 +50,7 @@ export function createMcpTransport({
       inputSchema: createTaskInputShape
     },
     async (args) => {
-      const task = await taskRuntimeService.createTask(args);
+      const task = await taskService.createTask(args);
 
       if (!task) {
         return {
@@ -92,7 +89,7 @@ export function createMcpTransport({
       inputSchema: requestTaskSchema
     },
     async (args) => {
-      const task = await executionLoop.run(args);
+      const task = await taskService.requestTask(args);
 
       if (!task) {
         return {
@@ -130,7 +127,7 @@ export function createMcpTransport({
       inputSchema: taskActionSchema
     },
     async (args) => taskMutationResult(
-      await taskRuntimeService.startTask(args.taskId, args.agentName),
+      await taskService.startTask(args.taskId, args.agentName),
       `Task ${args.taskId} is now in progress.`,
       `Task ${args.taskId} could not be started.`
     )
@@ -147,7 +144,7 @@ export function createMcpTransport({
       }
     },
     async (args) => taskMutationResult(
-      await taskRuntimeService.renewTaskLease(
+      await taskService.renewTaskLease(
         args.taskId,
         args.agentName,
         args.leaseDurationSeconds ?? 900
@@ -168,7 +165,7 @@ export function createMcpTransport({
       }
     },
     async (args) => taskMutationResult(
-      await taskRuntimeService.completeTask(args.taskId, args.agentName, {
+      await taskService.completeTask(args.taskId, args.agentName, {
         summary: args.summary,
         metadata: args.metadata
       }),
@@ -188,7 +185,7 @@ export function createMcpTransport({
       }
     },
     async (args) => taskMutationResult(
-      await taskRuntimeService.failTask(args.taskId, args.agentName, {
+      await taskService.failTask(args.taskId, args.agentName, {
         error: args.error,
         metadata: args.metadata
       }),
@@ -208,7 +205,7 @@ export function createMcpTransport({
       }
     },
     async (args) => taskMutationResult(
-      await taskRuntimeService.releaseTask(args.taskId, args.agentName, {
+      await taskService.releaseTask(args.taskId, args.agentName, {
         reason: args.reason,
         metadata: args.metadata
       }),
@@ -227,7 +224,7 @@ export function createMcpTransport({
       }
     },
     async (args) => {
-      const task = await taskRuntimeService.getTask(args.taskId);
+      const task = await taskService.getTask(args.taskId);
 
       if (!task) {
         return {
@@ -244,7 +241,7 @@ export function createMcpTransport({
         };
       }
 
-      const events = await taskRuntimeService.listTaskEvents(args.taskId);
+      const events = await taskService.listTaskEvents(args.taskId);
 
       return {
         content: [
@@ -279,7 +276,7 @@ export function createMcpTransport({
 }
 
 function taskMutationResult(
-  task: Awaited<ReturnType<TaskRuntimeService["getTask"]>>,
+  task: Awaited<ReturnType<TaskService["getTask"]>>,
   successText: string,
   failureText: string
 ) {

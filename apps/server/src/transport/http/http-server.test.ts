@@ -55,7 +55,7 @@ test("http transport serves dashboard snapshots and task detail", async () => {
 
     const streamResponse = await fetch("http://127.0.0.1:3210/api/dashboard/stream?projectId=demo-project");
     assert.equal(streamResponse.status, 200);
-    assert.equal(streamResponse.headers.get("content-type"), "text/event-stream");
+    assert.ok(streamResponse.headers.get("content-type")?.includes("text/event-stream"));
 
     const reader = streamResponse.body?.getReader();
     assert.ok(reader);

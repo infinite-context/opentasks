@@ -426,6 +426,10 @@ Before introducing a new component, confirm:
 
 These rules should be treated as default architectural constraints:
 
+- **Do not rewrite the Web UI.** The `apps/web` frontend is intentionally built with Vanilla TypeScript and HTML string templates. Do not attempt to rewrite it to React, Vue, Svelte, or any other framework.
+- **Use Fastify.** The backend HTTP server must use Fastify and `fastify-type-provider-zod` for routing and validation. Do not revert to raw `node:http` or introduce Express.
+- **Use Drizzle ORM.** The database layer must use Drizzle ORM for type-safe query building. Do not use raw SQL strings with `better-sqlite3`.
+- **Single Source of Truth for Contracts.** All types, interfaces, and Zod schemas must be imported directly from `@opentasks/contracts`. Do not create redundant `shared` directories in the server or web apps to re-export them.
 - Do not place business logic in `transport`.
 - Do not let `infra` define workflow behavior.
 - Do not let `shared` become a catch-all folder.
