@@ -1,6 +1,14 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import {
+  createTaskInputSchema,
+  taskActionSchema as sharedTaskActionSchema,
+  taskCompletionSchema,
+  taskFailureSchema,
+  taskReleaseSchema,
+  taskRequestSchema
+} from "@opentasks/contracts/schemas";
 import type { Logger } from "../../infra/logging";
 import type { ExecutionLoop } from "../../system/execution-loop";
 import type { TaskRuntimeService } from "../../system/task-runtime-service";
@@ -14,18 +22,9 @@ interface CreateMcpTransportParams {
   taskRuntimeService: TaskRuntimeService;
 }
 
-const requestTaskSchema = {
-  agentName: z.string().min(1),
-  projectId: z.string().min(1),
-  taskHint: z.string().optional(),
-  capabilities: z.array(z.string()).optional(),
-  leaseDurationSeconds: z.number().int().positive().optional()
-};
-
-const taskActionSchema = {
-  taskId: z.string().min(1),
-  agentName: z.string().min(1)
-};
+const requestTaskSchema = taskRequestSchema.shape;
+const createTaskInputShape = createTaskInputSchema.shape;
+const taskActionSchema = sharedTaskActionSchema.shape;
 
 export function createMcpTransport({
   logger,
@@ -41,10 +40,49 @@ export function createMcpTransport({
     },
     {
       instructions:
-        "OpenTasks coordinates project tasks for external agents. Use the task lifecycle tools to request, start, heartbeat, complete, fail, release, and inspect tasks."
+        "OpenTasks coordinates project tasks for external agents. Use create_task to add new tasks, then the task lifecycle tools to request, start, heartbeat, complete, fail, release, and inspect tasks."
     }
   );
   let transport: StdioServerTransport | null = null;
+
+  server.registerTool(
+    "create_task",
+    {
+      title: "Create Task",
+      description: "Create a new task in a project. The task will be available for agents to claim.",
+      inputSchema: createTaskInputShape
+    },
+    async (args) => {
+      const task = await taskRuntimeService.createTask(args);
+
+      if (!task) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Could not create task in project "${args.projectId}". The project may not exist.`
+            }
+          ],
+          structuredContent: {
+            task: null
+          },
+          isError: true
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Created task ${task.id}: "${task.title}".`
+          }
+        ],
+        structuredContent: {
+          task
+        }
+      };
+    }
+  );
 
   server.registerTool(
     "request_task",
@@ -126,8 +164,7 @@ export function createMcpTransport({
       description: "Mark a claimed task as completed.",
       inputSchema: {
         ...taskActionSchema,
-        summary: z.string().min(1),
-        metadata: z.record(z.string(), z.unknown()).optional()
+        ...taskCompletionSchema.shape
       }
     },
     async (args) => taskMutationResult(
@@ -147,8 +184,7 @@ export function createMcpTransport({
       description: "Mark a claimed task as failed.",
       inputSchema: {
         ...taskActionSchema,
-        error: z.string().min(1),
-        metadata: z.record(z.string(), z.unknown()).optional()
+        ...taskFailureSchema.shape
       }
     },
     async (args) => taskMutationResult(
@@ -168,8 +204,7 @@ export function createMcpTransport({
       description: "Release a claimed task back to the queue.",
       inputSchema: {
         ...taskActionSchema,
-        reason: z.string().min(1),
-        metadata: z.record(z.string(), z.unknown()).optional()
+        ...taskReleaseSchema.shape
       }
     },
     async (args) => taskMutationResult(

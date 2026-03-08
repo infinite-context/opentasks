@@ -1,6 +1,6 @@
 import type { Logger } from "../../infra/logging";
 import type { TaskStore } from "../../infra/storage/task-store";
-import type { TaskCompletion, TaskFailure, TaskRelease } from "../../shared/dtos";
+import type { CreateTaskInput, TaskCompletion, TaskFailure, TaskRelease } from "../../shared/dtos";
 import type { TaskRuntimeService } from "./types";
 
 interface CreateTaskRuntimeServiceParams {
@@ -15,6 +15,10 @@ export function createTaskRuntimeService({
   defaultLeaseDurationSeconds
 }: CreateTaskRuntimeServiceParams): TaskRuntimeService {
   return {
+    async createTask(input: CreateTaskInput) {
+      logger.step("task-runtime-service", `Creating task "${input.title}" in project "${input.projectId}".`);
+      return taskStore.createTask(input);
+    },
     async getTask(taskId) {
       logger.step("task-runtime-service", `Loading task "${taskId}".`);
       return taskStore.getTaskById(taskId);

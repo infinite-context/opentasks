@@ -19,7 +19,8 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
       ...process.env,
       OPENTASKS_STORAGE_DRIVER: "memory",
       OPENTASKS_AUTO_MIGRATE: "false",
-      OPENTASKS_SEED_DEMO_DATA: "true"
+      OPENTASKS_SEED_DEMO_DATA: "true",
+      OPENTASKS_HTTP_ENABLED: "false"
     },
     stderr: "pipe"
   });

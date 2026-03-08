@@ -1,9 +1,11 @@
 import type {
   ClaimedTask,
+  ProjectRecord,
   TaskEvent,
   TaskRecord
 } from "../../shared/types";
 import type {
+  CreateTaskInput,
   TaskClaimOptions,
   TaskCompletion,
   TaskFailure,
@@ -12,11 +14,13 @@ import type {
 } from "../../shared/dtos";
 
 export interface TaskStore {
+  createTask(input: CreateTaskInput): Promise<TaskRecord | null>;
   claimNextTask(
     projectId: string,
     agentName: string,
     options: TaskClaimOptions
   ): Promise<ClaimedTask | null>;
+  getProject(projectId: string): Promise<ProjectRecord | null>;
   getTaskById(taskId: string): Promise<TaskRecord | null>;
   listTasks(filters?: TaskQueryFilters): Promise<TaskRecord[]>;
   markTaskInProgress(taskId: string, agentName: string): Promise<TaskRecord | null>;
@@ -30,4 +34,5 @@ export interface TaskStore {
   ): Promise<TaskRecord | null>;
   requeueExpiredTasks(projectId?: string): Promise<number>;
   listTaskEvents(taskId: string): Promise<TaskEvent[]>;
+  listProjectTaskEvents(projectId: string, limit?: number): Promise<TaskEvent[]>;
 }

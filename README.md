@@ -39,7 +39,7 @@ That is the core interaction model of the system.
 
 ### 1. The Execution Loop (Doing the work)
 1. An external agent requests work via the **MCP Server**.
-2. The **Task Orchestrator** pulls an available task from the PostgreSQL database.
+2. The **Task Orchestrator** pulls an available task from the SQLite database.
 3. The **Context Hydrator** fetches relevant prior memory from the Vector Search Engine.
 4. The hydrated task is returned to the agent, primed with everything it needs to know.
 
@@ -54,7 +54,6 @@ That is the core interaction model of the system.
 ### Prerequisites
 - Node.js (v20+ recommended)
 - npm (bundled with Node.js)
-- PostgreSQL (for the task database)
 - Vector Database (configuration pending)
 - OpenRouter API Key (for the internal indexing agent)
 
@@ -71,12 +70,28 @@ That is the core interaction model of the system.
    npm install
    ```
 
-3. Set up your environment variables (see `.env.example` in `apps/server`).
-
-4. Start the development server:
+3. Start the development server:
    ```bash
    npm run dev
    ```
+
+### MCP (Cursor / Claude Desktop)
+
+To connect OpenTasks as an MCP server, add to your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "opentasks": {
+      "command": "npm",
+      "args": ["run", "start:mcp"],
+      "cwd": "/path/to/opentasks"
+    }
+  }
+}
+```
+
+Both the dev server and MCP share the same SQLite database (`data/opentasks.db`), so tasks created via MCP appear in the dashboard automatically.
 
 ## Documentation
 

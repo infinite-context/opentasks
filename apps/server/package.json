@@ -3,19 +3,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "tsx src/index-dev.ts",
+    "start:mcp": "tsx src/index-mcp.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "tsx --test src/**/*.test.ts"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.0.0",
-    "@types/pg": "^8.18.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "pg": "^8.20.0",
+    "@opentasks/contracts": "*",
+    "better-sqlite3": "^12.6.2",
     "zod": "^4.3.6"
   }
 }

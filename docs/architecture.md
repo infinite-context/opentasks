@@ -21,6 +21,12 @@ Databases used for task state and retrievable memory.
 
 ## External components
 
+### Web UI
+
+The web UI is the browser-facing observability surface for the system.
+
+It visualizes backend task coordination state through HTTP and SSE, and it uses the same canonical project, task, and task event models that the backend uses internally.
+
 ### External Agent
 
 The external agent is any client that requests work from the system and performs the task after receiving context.
@@ -37,11 +43,17 @@ Additional providers can be supported through the model provider service.
 
 ### MCP Server
 
-The MCP server is the entry point into the system.
+The MCP server is the agent-facing entry point into the system.
 
 It runs as a long-lived stdio MCP service and exposes task lifecycle tools to external agents.
 
 These tools currently include task request, start, heartbeat, complete, fail, release, and task inspection operations.
+
+### HTTP Server
+
+The HTTP server is the browser-facing transport for dashboard and task inspection flows.
+
+It exposes JSON read endpoints for dashboard snapshots, task lists, and task detail, and it exposes an SSE stream for live dashboard refresh.
 
 ### Logger
 
@@ -60,6 +72,18 @@ It requests available work from the task list manager and returns the claimed ta
 The task list manager is responsible for selecting available work from the task database.
 
 It handles task retrieval, assignment, and dependency-aware task availability.
+
+### Task Query Service
+
+The task query service provides read-oriented task list and task detail responses for browser consumers.
+
+It assembles canonical task records and their related lifecycle events without embedding transport logic.
+
+### Dashboard Query Service
+
+The dashboard query service builds aggregate observability responses for the web UI.
+
+It derives summary metrics, pipeline counts, recent activity, agent workload, and health views from canonical backend task and event data.
 
 ### Context Hydrator
 
@@ -145,19 +169,35 @@ The learning loop is the path used to turn completed work into reusable memory.
 6. The internal agent returns generated context artifacts to the indexing workflow.
 7. The indexer inserts or updates stored memory in the vector database.
 
+### Dashboard read path
+
+The dashboard read path is the browser-facing observability flow.
+
+1. The web UI requests a dashboard snapshot through the HTTP server.
+2. The HTTP server validates query parameters with shared schemas.
+3. The HTTP server calls the dashboard query service or task query service.
+4. The query service loads canonical project, task, and event data from the task store.
+5. Aggregate dashboard DTOs are built around canonical entities.
+6. The response is returned to the browser as JSON.
+7. The SSE endpoint periodically emits fresh dashboard snapshot events for live updates.
+
 ## System flow
 
-The system currently operates through an active task coordination path and a defined learning path. The active task path handles task selection, dependency-aware claiming, lease management, lifecycle transitions, and delivery through MCP. The learning path remains part of the architecture and continues to define how completed work will eventually become reusable context for future runs.
+The system currently operates through an active task coordination path, an active dashboard read path, and a defined learning path. The task path handles task selection, dependency-aware claiming, lease management, lifecycle transitions, and delivery through MCP. The dashboard path handles browser-oriented observability through HTTP and SSE over the same task store. The learning path remains part of the architecture and continues to define how completed work will eventually become reusable context for future runs.
 
 ## Shared contracts
 
-The server currently separates shared contracts into three categories:
+The system currently uses a canonical shared contract package at `packages/contracts`, with server-local `shared` modules acting as app-level facades where helpful.
+
+The contract package is separated into three categories:
 
 1. `primitives`
 Base structural interfaces such as identity and auditable models.
 
 2. `types`
-Persisted or domain-facing entity/state contracts such as tasks, claimed tasks, task events, and memory artifacts.
+Persisted or domain-facing entity/state contracts such as projects, tasks, claimed tasks, task events, and memory artifacts.
 
 3. `dtos`
-Transport-facing and workflow input/output shapes such as task requests, task completions, task releases, hydrated task payloads, and model request DTOs.
+Transport-facing and workflow input/output shapes such as task requests, task completions, task releases, task detail responses, dashboard snapshots, hydrated task payloads, and model request DTOs.
+
+Runtime validation schemas for these contracts live alongside them so MCP and HTTP can validate from the same source.

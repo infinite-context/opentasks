@@ -1,7 +1,8 @@
 import type { TaskEvent, TaskRecord } from "../../shared/types";
-import type { TaskCompletion, TaskFailure, TaskRelease } from "../../shared/dtos";
+import type { CreateTaskInput, TaskCompletion, TaskFailure, TaskRelease } from "../../shared/dtos";
 
 export interface TaskRuntimeService {
+  createTask(input: CreateTaskInput): Promise<TaskRecord | null>;
   getTask(taskId: string): Promise<TaskRecord | null>;
   listTaskEvents(taskId: string): Promise<TaskEvent[]>;
   listTasks(projectId?: string): Promise<TaskRecord[]>;
