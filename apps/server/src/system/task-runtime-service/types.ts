@@ -1,5 +1,5 @@
-import type { TaskEvent, TaskRecord } from "../../shared/types";
-import type { CreateTaskInput, TaskCompletion, TaskFailure, TaskRelease } from "../../shared/dtos";
+import type { TaskEvent, TaskRecord } from "@opentasks/contracts";
+import type { CreateTaskInput, TaskCompletion, TaskFailure, TaskRelease } from "@opentasks/contracts";
 
 export interface TaskRuntimeService {
   createTask(input: CreateTaskInput): Promise<TaskRecord | null>;

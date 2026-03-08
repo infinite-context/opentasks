@@ -1,5 +1,5 @@
 import type { Logger } from "../../infra/logging";
-import type { TaskRequest } from "../../shared/dtos";
+import type { TaskRequest } from "@opentasks/contracts";
 import type { TaskListManager } from "../task-list-manager";
 import type { TaskOrchestrator } from "./types";
 

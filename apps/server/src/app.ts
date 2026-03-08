@@ -9,11 +9,8 @@ import { createInMemoryTaskStore } from "./infra/storage/in-memory-task-store";
 import { createSqliteTaskDatabase } from "./infra/storage/sqlite-task-database";
 import { applySqliteSchema, seedSqliteDemoData } from "./infra/storage/sqlite-schema";
 import { createDashboardQueryService } from "./system/dashboard-query-service";
-import { createExecutionLoop } from "./system/execution-loop";
-import { createTaskListManager } from "./system/task-list-manager";
-import { createTaskOrchestrator } from "./system/task-orchestrator";
+import { createTaskService } from "./system/task-service";
 import { createTaskQueryService } from "./system/task-query-service";
-import { createTaskRuntimeService } from "./system/task-runtime-service";
 import { createHttpTransport } from "./transport/http";
 import { createMcpTransport } from "./transport/mcp";
 
@@ -52,18 +49,12 @@ export function createApp(overrides?: Partial<AppEnv>): App {
       ? createSqliteTaskDatabase({ logger, db })
       : createInMemoryTaskStore({ logger });
 
-  const taskListManager = createTaskListManager({ logger, taskStore });
-  const taskOrchestrator = createTaskOrchestrator({
-    logger,
-    taskListManager,
-    defaultLeaseDurationSeconds: env.defaultLeaseDurationSeconds
-  });
-  const executionLoop = createExecutionLoop({ logger, taskOrchestrator });
-  const taskRuntimeService = createTaskRuntimeService({
+  const taskService = createTaskService({
     logger,
     taskStore,
     defaultLeaseDurationSeconds: env.defaultLeaseDurationSeconds
   });
+
   const taskQueryService = createTaskQueryService({
     logger,
     taskStore
@@ -77,8 +68,7 @@ export function createApp(overrides?: Partial<AppEnv>): App {
         logger,
         appName: env.appName,
         appVersion: env.appVersion,
-        executionLoop,
-        taskRuntimeService
+        taskService
       })
     : null;
   const projectPath = process.env.OPENTASKS_PROJECT_PATH ?? getCwd();

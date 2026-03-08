@@ -7,8 +7,8 @@ import type {
   DashboardPipelineItemDto,
   DashboardQuery,
   DashboardSnapshotDto
-} from "../../shared/dtos";
-import type { TaskEvent, TaskRecord, TaskStatus } from "../../shared/types";
+} from "@opentasks/contracts";
+import type { TaskEvent, TaskRecord, TaskStatus } from "@opentasks/contracts";
 import type { DashboardQueryService } from "./types";
 
 interface CreateDashboardQueryServiceParams {

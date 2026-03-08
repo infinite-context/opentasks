@@ -7,7 +7,7 @@ import type {
   TaskEventActorType,
   TaskEventType,
   TaskRecord
-} from "../../shared/types";
+} from "@opentasks/contracts";
 import type {
   CreateTaskInput,
   TaskClaimOptions,
@@ -15,7 +15,7 @@ import type {
   TaskFailure,
   TaskQueryFilters,
   TaskRelease
-} from "../../shared/dtos";
+} from "@opentasks/contracts";
 import type { TaskStore } from "./task-store";
 
 interface CreateInMemoryTaskStoreParams {

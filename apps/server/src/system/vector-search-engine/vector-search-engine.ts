@@ -1,6 +1,6 @@
 import type { Logger } from "../../infra/logging";
 import type { VectorDatabase } from "../../infra/storage/vector-database";
-import type { TaskRecord } from "../../shared/types";
+import type { TaskRecord } from "@opentasks/contracts";
 import type { VectorSearchEngine } from "./types";
 
 interface CreateVectorSearchEngineParams {

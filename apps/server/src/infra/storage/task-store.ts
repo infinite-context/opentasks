@@ -3,7 +3,7 @@ import type {
   ProjectRecord,
   TaskEvent,
   TaskRecord
-} from "../../shared/types";
+} from "@opentasks/contracts";
 import type {
   CreateTaskInput,
   TaskClaimOptions,
@@ -11,7 +11,7 @@ import type {
   TaskFailure,
   TaskQueryFilters,
   TaskRelease
-} from "../../shared/dtos";
+} from "@opentasks/contracts";
 
 export interface TaskStore {
   createTask(input: CreateTaskInput): Promise<TaskRecord | null>;

@@ -1,5 +1,6 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { URL } from "node:url";
+import fastify from "fastify";
+import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from "fastify-type-provider-zod";
+import { FastifySSEPlugin } from "fastify-sse-v2";
 import {
   dashboardQuerySchema,
   dashboardStreamEventDtoSchema,
@@ -29,162 +30,111 @@ export function createHttpTransport({
   dashboardQueryService,
   taskQueryService
 }: CreateHttpTransportParams): HttpTransport {
-  const server = createServer(async (request, response) => {
-    setCorsHeaders(response);
+  const server = fastify({
+    logger: false,
+    forceCloseConnections: true
+  }).withTypeProvider<ZodTypeProvider>();
 
-    if (request.method === "OPTIONS") {
-      response.writeHead(204);
-      response.end();
-      return;
-    }
+  server.setValidatorCompiler(validatorCompiler);
+  server.setSerializerCompiler(serializerCompiler);
 
-    try {
-      await handleRequest(request, response);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unexpected server error.";
-      logger.info("transport:http", message);
+  server.register(FastifySSEPlugin);
 
-      if (!response.headersSent) {
-        sendJson(response, 500, {
-          error: "internal_server_error",
-          message
-        });
-      } else {
-        response.end();
-      }
-    }
+  server.addHook("onRequest", async (request, reply) => {
+    reply.header("Access-Control-Allow-Origin", "*");
+    reply.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    reply.header("Access-Control-Allow-Headers", "Content-Type");
   });
 
-  async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
+  server.options("*", async (request, reply) => {
+    return reply.status(204).send();
+  });
 
-    if (request.method !== "GET") {
-      sendJson(response, 405, { error: "method_not_allowed" });
-      return;
+  server.get("/api/dashboard", {
+    schema: {
+      querystring: dashboardQuerySchema
     }
+  }, async (request, reply) => {
+    const query = request.query;
+    const snapshot = await dashboardQueryService.getSnapshot(query);
+    return reply.status(200).send(snapshot);
+  });
 
-    if (url.pathname === "/api/dashboard") {
-      const query = dashboardQuerySchema.parse({
-        projectId: emptyToUndefined(url.searchParams.get("projectId"))
-      });
+  server.get("/api/dashboard/stream", {
+    schema: {
+      querystring: dashboardQuerySchema
+    }
+  }, async (request, reply) => {
+    const query = request.query;
+
+    const sendSnapshot = async () => {
       const snapshot = await dashboardQueryService.getSnapshot(query);
-      sendJson(response, 200, snapshot);
-      return;
-    }
-
-    if (url.pathname === "/api/dashboard/stream") {
-      const query = dashboardQuerySchema.parse({
-        projectId: emptyToUndefined(url.searchParams.get("projectId"))
+      const event = dashboardStreamEventDtoSchema.parse({
+        type: "dashboard.snapshot",
+        data: snapshot
       });
-
-      response.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive"
+      reply.sse({
+        event: event.type,
+        data: JSON.stringify(event)
       });
-      response.write("retry: 5000\n\n");
+    };
 
-      const sendSnapshot = async () => {
-        const snapshot = await dashboardQueryService.getSnapshot(query);
-        const event = dashboardStreamEventDtoSchema.parse({
-          type: "dashboard.snapshot",
-          data: snapshot
-        });
-
-        response.write(`event: ${event.type}\n`);
-        response.write(`data: ${JSON.stringify(event)}\n\n`);
-      };
-
-      await sendSnapshot();
-      const timer = setInterval(() => {
-        void sendSnapshot().catch((error: unknown) => {
-          logger.info(
-            "transport:http",
-            error instanceof Error ? error.message : "Failed to emit dashboard snapshot."
-          );
-        });
-      }, 5000);
-
-      request.on("close", () => {
-        clearInterval(timer);
-        response.end();
+    await sendSnapshot();
+    const timer = setInterval(() => {
+      void sendSnapshot().catch((error: unknown) => {
+        logger.info(
+          "transport:http",
+          error instanceof Error ? error.message : "Failed to emit dashboard snapshot."
+        );
       });
-      return;
+    }, 5000);
+
+    request.raw.on("close", () => {
+      clearInterval(timer);
+    });
+  });
+
+  server.get("/api/tasks", {
+    schema: {
+      querystring: taskListQuerySchema
     }
+  }, async (request, reply) => {
+    const query = request.query;
+    const tasks = await taskQueryService.listTasks(query);
+    return reply.status(200).send(tasks);
+  });
 
-    if (url.pathname === "/api/tasks") {
-      const statusParams = url.searchParams.getAll("status").flatMap((value) => value.split(","));
-      const query = taskListQuerySchema.parse({
-        projectId: emptyToUndefined(url.searchParams.get("projectId")),
-        status: statusParams.length > 0 ? statusParams.filter(Boolean) : undefined,
-        assignedTo: emptyToUndefined(url.searchParams.get("assignedTo")),
-        limit: emptyToUndefined(url.searchParams.get("limit"))
-      });
+  server.get("/api/tasks/:taskId", async (request, reply) => {
+    const { taskId } = request.params as { taskId: string };
+    const detail = await taskQueryService.getTaskDetail(taskId);
+    return reply.status(detail.task ? 200 : 404).send(detail);
+  });
 
-      const tasks = await taskQueryService.listTasks(query);
-      sendJson(response, 200, tasks);
-      return;
-    }
+  server.get("/api/meta", async (request, reply) => {
+    const normalizedPath = projectPath.replace(/\\/g, "/");
+    return reply.status(200).send({
+      name: appName,
+      version: appVersion,
+      projectPath: normalizedPath
+    });
+  });
 
-    if (url.pathname.startsWith("/api/tasks/")) {
-      const taskId = decodeURIComponent(url.pathname.replace("/api/tasks/", ""));
-      const detail = await taskQueryService.getTaskDetail(taskId);
-      sendJson(response, detail.task ? 200 : 404, detail);
-      return;
-    }
-
-    if (url.pathname === "/api/meta") {
-      const normalizedPath = projectPath.replace(/\\/g, "/");
-      sendJson(response, 200, {
-        name: appName,
-        version: appVersion,
-        projectPath: normalizedPath
-      });
-      return;
-    }
-
-    sendJson(response, 404, { error: "not_found" });
-  }
+  server.setErrorHandler((error: any, request, reply) => {
+    const message = error instanceof Error ? error.message : "Unexpected server error.";
+    logger.info("transport:http", message);
+    return reply.status(error.statusCode || 500).send({
+      error: "internal_server_error",
+      message
+    });
+  });
 
   return {
     async start(): Promise<void> {
-      await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(port, () => {
-          server.off("error", reject);
-          logger.info("transport:http", `OpenTasks HTTP server is listening on port ${port}.`);
-          resolve();
-        });
-      });
+      await server.listen({ port, host: "0.0.0.0" });
+      logger.info("transport:http", `OpenTasks HTTP server is listening on port ${port}.`);
     },
     async close(): Promise<void> {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve();
-        });
-      });
+      await server.close();
     }
   };
-}
-
-function emptyToUndefined(value: string | null): string | undefined {
-  return value && value.length > 0 ? value : undefined;
-}
-
-function setCorsHeaders(response: ServerResponse): void {
-  response.setHeader("Access-Control-Allow-Origin", "*");
-  response.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  response.setHeader("Access-Control-Allow-Headers", "Content-Type");
-}
-
-function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
-  response.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8"
-  });
-  response.end(JSON.stringify(body));
 }

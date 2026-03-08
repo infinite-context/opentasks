@@ -1,6 +1,6 @@
 import type { Logger } from "../../infra/logging";
-import type { MemoryArtifact } from "../../shared/types";
-import type { CompletedRun } from "../../shared/dtos";
+import type { MemoryArtifact } from "@opentasks/contracts";
+import type { CompletedRun } from "@opentasks/contracts";
 import type { Indexer } from "../indexer";
 
 export interface LearningLoop {

@@ -1,6 +1,6 @@
 import type { Logger } from "../../infra/logging";
 import type { TaskStore } from "../../infra/storage/task-store";
-import type { TaskListQuery } from "../../shared/dtos";
+import type { TaskListQuery } from "@opentasks/contracts";
 import type { TaskQueryService } from "./types";
 
 interface CreateTaskQueryServiceParams {
