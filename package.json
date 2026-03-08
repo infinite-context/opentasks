@@ -1,0 +1,19 @@
+{
+  "name": "opentasks",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npx tsx apps/server/src/index-dev.ts",
+    "start:mcp": "npx tsx apps/server/src/index-mcp.ts",
+    "dev:web": "npm --workspace=@opentasks/web --silent run dev",
+    "build:web": "npm --workspace=@opentasks/web --silent run build",
+    "typecheck": "npm --workspace=@opentasks/contracts --silent run typecheck && npm --workspace=@opentasks/server --silent run typecheck && npm --workspace=@opentasks/web --silent run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
