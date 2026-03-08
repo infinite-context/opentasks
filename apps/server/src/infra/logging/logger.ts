@@ -14,15 +14,15 @@ export function createLogger(): Logger {
   return {
     section(title) {
       stepCount = 0;
-      console.log(`\n=== ${title} ===`);
+      console.error(`\n=== ${title} ===`);
     },
     step(scope, message) {
       stepCount += 1;
       const number = String(stepCount).padStart(2, "0");
-      console.log(`${number}. ${formatScope(scope)} ${message}`);
+      console.error(`${number}. ${formatScope(scope)} ${message}`);
     },
     info(scope, message) {
-      console.log(`-  ${formatScope(scope)} ${message}`);
+      console.error(`-  ${formatScope(scope)} ${message}`);
     }
   };
 }

@@ -1,6 +1,7 @@
 import type { Logger } from "../../infra/logging";
 import type { VectorDatabase } from "../../infra/storage/vector-database";
-import type { CompletedRun, MemoryArtifact } from "../../shared/types";
+import type { MemoryArtifact } from "../../shared/types";
+import type { CompletedRun } from "../../shared/dtos";
 import type { InternalAgent } from "../internal-agent";
 import type { Indexer } from "./types";
 
