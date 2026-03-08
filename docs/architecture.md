@@ -27,7 +27,6 @@ The web UI is the browser-facing observability surface for the system.
 
 It visualizes backend task coordination state through HTTP and SSE, and it uses the same canonical project, goal, task, and task event models that the backend uses internally.
 
-
 **Important Architectural Note:** The Web UI is intentionally built using Vanilla TypeScript, raw HTML string templates, and Vite. It does not use a modern reactive framework like React or Vue. This is by design to maintain a specific architectural footprint. Do not attempt to rewrite the frontend to a different framework.
 
 ### External Agent
@@ -54,11 +53,11 @@ These tools currently include project creation and lookup, goal creation and upd
 
 ### HTTP Server
 
-The HTTP server is the browser-facing transport for dashboard and task inspection flows.
+The HTTP server is the browser-facing transport for project, goal, dashboard, and task inspection flows.
 
-It exposes JSON read endpoints for dashboard snapshots, task lists, and task detail, and it exposes an SSE stream for live dashboard refresh.
+It exposes JSON endpoints for project listing and creation, goal listing by project, dashboard snapshots, task lists, task detail, and supporting browser metadata and file-system flows. It also exposes an SSE stream for live dashboard refresh.
 
-It exposes the project-aware read endpoints needed by the web UI, including project-driven dashboard and task inspection flows.
+It exposes the project-aware read endpoints needed by the web UI, including project selection, project-overview reads, goal inspection, dashboard reads, and task inspection flows.
 
 It is built using Fastify and utilizes `fastify-type-provider-zod` for native request validation against the shared `@opentasks/contracts` schemas.
 
@@ -201,23 +200,23 @@ The learning loop is the path that will eventually turn completed work into reus
 
 This path is intentionally deferred and is not part of the active runtime yet.
 
-### Dashboard read path
+### Browser read path
 
-The dashboard read path is the browser-facing observability flow.
+The browser read path is the browser-facing observability flow.
 
-1. The web UI requests a dashboard snapshot through the HTTP server.
+1. The web UI selects an active project and requests project-scoped data through the HTTP server.
 2. The HTTP server validates query parameters with shared schemas.
-3. The HTTP server calls the dashboard query service or task query service.
-4. The query service loads canonical project, goal, task, and event data from the coordination store.
-5. Aggregate dashboard DTOs are built around canonical entities.
+3. The HTTP server calls the project service, goal service, dashboard query service, or task query service depending on the view being loaded.
+4. The service layer loads canonical project, goal, task, and event data from the coordination store.
+5. Aggregate or list DTOs are built around canonical entities.
 6. The response is returned to the browser as JSON.
 7. The SSE endpoint periodically emits fresh dashboard snapshot events for live updates.
 
-The browser UI uses this read path to maintain its active project context and to keep project-scoped dashboard state synchronized with live backend data.
+The browser UI uses this read path to maintain its active project context, render project and goal pages, and keep project-scoped dashboard state synchronized with live backend data.
 
 ## System flow
 
-The system currently operates through an active goal-driven task coordination path and an active dashboard read path. The task path handles project and goal validation, goal selection, dependency-aware claiming, lease management, lifecycle transitions, and delivery through MCP. The dashboard path handles browser-oriented observability through HTTP and SSE over the same coordination store. The retrieval, indexing, and model-backed learning components remain deferred for a later phase.
+The system currently operates through an active goal-driven task coordination path and an active browser read path. The task path handles project and goal validation, goal selection, dependency-aware claiming, lease management, lifecycle transitions, and delivery through MCP. The browser path handles project selection, project and goal inspection, and dashboard/task observability through HTTP and SSE over the same coordination store. The retrieval, indexing, and model-backed learning components remain deferred for a later phase.
 
 The system also now exposes standardized operation outcomes for mutation-style workflows so transport adapters can render actionable guidance without owning business rules themselves.
 

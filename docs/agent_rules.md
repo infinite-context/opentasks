@@ -75,6 +75,15 @@ As the project expands, use this layout:
 
 Rule: deployable runtimes belong in `apps/*`. Reusable cross-app code belongs in `packages/*`.
 
+For the current web app specifically, keep the browser UI as a manual view-driven shell:
+
+- sidebar navigation selects a `ViewId`
+- `main.ts` owns app-level state and data loading
+- `views/*` render page-level HTML string templates
+- shared browser fetch/build helpers live in `lib/*`
+
+Rule: when adding pages such as project or goals views, extend the existing view/state pattern rather than introducing a client-side router or framework-specific state system.
+
 ## Layer responsibilities
 
 ### `transport`
@@ -230,6 +239,7 @@ For browser-facing transports specifically:
 
 - keep the browser on HTTP/SSE rather than direct MCP
 - expose project-aware aggregate read models that contain canonical entities rather than frontend-only copies
+- expose project-scoped browser endpoints for the active shell flows, including project selection, goal inspection, dashboard reads, and task inspection
 - validate request/query shapes with shared schemas from `packages/contracts`
 
 ### Add a new system capability
@@ -301,6 +311,8 @@ Rule: request objects, mutation payloads, and transport responses should be mode
 Rule: if a model represents a real domain object such as a project, task, or task event, define it once and reuse it everywhere. Do not create frontend-specific copies of canonical backend entity models.
 
 Rule: aggregate dashboard/query DTOs are allowed, but they should wrap canonical entities rather than redefine them.
+
+Rule: browser-facing goal and project pages should consume canonical shared DTOs such as project list and goal list responses rather than defining local view-model copies of those entities.
 
 Rule: if a type crosses more than one app boundary, move it into `packages/contracts` and back it with runtime validation when appropriate.
 
@@ -409,7 +421,7 @@ When adding or changing a major component:
 - update `docs/architecture.md` if the runtime flow changes
 - update `docs/agent_rules.md` if the structural rule set changes
 - add module-level README or doc comments only when the behavior is non-obvious
-- update browser-facing docs when navigation or read flows change materially, such as introducing project-aware selection and project-scoped dashboard views
+- update browser-facing docs when navigation or read flows change materially, such as introducing project-aware selection, project-scoped dashboard views, project overview pages, or dedicated goals views
 
 ## Change checklist
 
