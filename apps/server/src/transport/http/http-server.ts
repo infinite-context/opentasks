@@ -14,6 +14,7 @@ interface CreateHttpTransportParams {
   logger: Logger;
   appName: string;
   appVersion: string;
+  projectPath: string;
   port: number;
   dashboardQueryService: DashboardQueryService;
   taskQueryService: TaskQueryService;
@@ -23,6 +24,7 @@ export function createHttpTransport({
   logger,
   appName,
   appVersion,
+  projectPath,
   port,
   dashboardQueryService,
   taskQueryService
@@ -132,9 +134,11 @@ export function createHttpTransport({
     }
 
     if (url.pathname === "/api/meta") {
+      const normalizedPath = projectPath.replace(/\\/g, "/");
       sendJson(response, 200, {
         name: appName,
-        version: appVersion
+        version: appVersion,
+        projectPath: normalizedPath
       });
       return;
     }

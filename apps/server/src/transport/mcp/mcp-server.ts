@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
+  createTaskInputSchema,
   taskActionSchema as sharedTaskActionSchema,
   taskCompletionSchema,
   taskFailureSchema,
@@ -22,6 +23,7 @@ interface CreateMcpTransportParams {
 }
 
 const requestTaskSchema = taskRequestSchema.shape;
+const createTaskInputShape = createTaskInputSchema.shape;
 const taskActionSchema = sharedTaskActionSchema.shape;
 
 export function createMcpTransport({
@@ -38,10 +40,49 @@ export function createMcpTransport({
     },
     {
       instructions:
-        "OpenTasks coordinates project tasks for external agents. Use the task lifecycle tools to request, start, heartbeat, complete, fail, release, and inspect tasks."
+        "OpenTasks coordinates project tasks for external agents. Use create_task to add new tasks, then the task lifecycle tools to request, start, heartbeat, complete, fail, release, and inspect tasks."
     }
   );
   let transport: StdioServerTransport | null = null;
+
+  server.registerTool(
+    "create_task",
+    {
+      title: "Create Task",
+      description: "Create a new task in a project. The task will be available for agents to claim.",
+      inputSchema: createTaskInputShape
+    },
+    async (args) => {
+      const task = await taskRuntimeService.createTask(args);
+
+      if (!task) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Could not create task in project "${args.projectId}". The project may not exist.`
+            }
+          ],
+          structuredContent: {
+            task: null
+          },
+          isError: true
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Created task ${task.id}: "${task.title}".`
+          }
+        ],
+        structuredContent: {
+          task
+        }
+      };
+    }
+  );
 
   server.registerTool(
     "request_task",

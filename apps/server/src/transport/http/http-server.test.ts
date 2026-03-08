@@ -20,6 +20,7 @@ test("http transport serves dashboard snapshots and task detail", async () => {
     logger,
     appName: "opentasks",
     appVersion: "0.1.0",
+    projectPath: process.cwd(),
     port: 3210,
     dashboardQueryService,
     taskQueryService

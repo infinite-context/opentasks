@@ -5,6 +5,7 @@ import type {
   TaskRecord
 } from "../../shared/types";
 import type {
+  CreateTaskInput,
   TaskClaimOptions,
   TaskCompletion,
   TaskFailure,
@@ -13,6 +14,7 @@ import type {
 } from "../../shared/dtos";
 
 export interface TaskStore {
+  createTask(input: CreateTaskInput): Promise<TaskRecord | null>;
   claimNextTask(
     projectId: string,
     agentName: string,

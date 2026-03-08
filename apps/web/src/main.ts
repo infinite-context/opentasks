@@ -3,65 +3,67 @@ import {
   dashboardSnapshotDtoSchema,
   dashboardStreamEventDtoSchema,
   taskDetailDtoSchema,
-  type DashboardHealthItemDto,
+  taskListDtoSchema,
   type DashboardSnapshotDto,
   type TaskDetailDto,
-  type TaskEvent,
-  type TaskRecord,
-  type TaskStatus
+  type TaskRecord
 } from "@opentasks/contracts";
 import "./style.css";
 
-type Theme = "light" | "dark";
-type TaskFilter = "all" | "blocked" | "in_progress";
-type ConnectionState = "connecting" | "connected" | "disconnected";
-
-interface NavItem {
-  label: string;
-  icon: string;
-}
-
-const API_BASE_URL = (import.meta.env.VITE_OPENTASKS_API_BASE_URL as string | undefined) ?? "http://localhost:3001";
-const DEFAULT_PROJECT_ID =
-  (import.meta.env.VITE_OPENTASKS_PROJECT_ID as string | undefined) ?? "demo-project";
+import { renderSidebar, renderTopbar } from "./components";
+import { DEFAULT_PROJECT_ID } from "./config";
+import {
+  buildDashboardApiUrl,
+  buildDashboardStreamUrl,
+  buildFocusMessage,
+  buildMetaUrl,
+  buildTaskDetailUrl,
+  buildTaskListUrl,
+  filterTasks,
+  getAppRoot,
+  pickSelectedTaskId,
+  taskFilterToStatusParams,
+  resolveInitialTheme,
+  persistTheme
+} from "./lib";
+import {
+  renderAgentsView,
+  renderDashboardView,
+  renderMcpView,
+  renderPlaceholderView,
+  renderSystemHealthView,
+  renderTasksView
+} from "./views";
+import type { ConnectionState, TaskFilter, ViewId } from "./types";
 
 const appRoot = getAppRoot();
 
 let activeTheme = resolveInitialTheme();
+let currentView: ViewId = "dashboard";
 let selectedTaskId = "";
 let activeTaskFilter: TaskFilter = "all";
 let dashboardSnapshot: DashboardSnapshotDto | null = null;
+let taskList: TaskRecord[] = [];
 let selectedTaskDetail: TaskDetailDto | null = null;
 let connectionState: ConnectionState = "connecting";
 let errorMessage = "";
+let tasksViewErrorMessage = "";
 let isLoading = true;
+let tasksViewLoading = false;
 let dashboardStream: EventSource | null = null;
+let mcpProjectPath: string | null = null;
+let mcpErrorMessage = "";
+let mcpLoading = false;
+let mcpConfigJson = "";
 
 void initializeApp();
 
-function resolveInitialTheme(): Theme {
-  const stored = window.localStorage.getItem("opentasks-theme");
-  if (stored === "light" || stored === "dark") {
-    return stored;
-  }
-
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-function getAppRoot(): HTMLDivElement {
-  const root = document.querySelector<HTMLDivElement>("#app");
-
-  if (!root) {
-    throw new Error("App root element not found.");
-  }
-
-  return root;
-}
-
 async function initializeApp(): Promise<void> {
   renderApp();
-  await loadDashboardSnapshot();
-  connectDashboardStream();
+  await loadDataForCurrentView();
+  if (currentView === "dashboard") {
+    connectDashboardStream();
+  }
   window.addEventListener("beforeunload", () => {
     dashboardStream?.close();
   });
@@ -73,7 +75,7 @@ async function loadDashboardSnapshot(): Promise<void> {
   renderApp();
 
   try {
-    const response = await fetch(buildApiUrl("/api/dashboard", { projectId: DEFAULT_PROJECT_ID }));
+    const response = await fetch(buildDashboardApiUrl(DEFAULT_PROJECT_ID));
     if (!response.ok) {
       throw new Error(`Dashboard request failed with status ${response.status}.`);
     }
@@ -92,6 +94,36 @@ async function loadDashboardSnapshot(): Promise<void> {
   }
 }
 
+async function loadTaskList(): Promise<void> {
+  tasksViewLoading = true;
+  tasksViewErrorMessage = "";
+  renderApp();
+
+  try {
+    const statusParams = taskFilterToStatusParams(activeTaskFilter);
+    const url = buildTaskListUrl({
+      projectId: DEFAULT_PROJECT_ID,
+      status: statusParams,
+      limit: 100
+    });
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Task list request failed with status ${response.status}.`);
+    }
+
+    const dto = taskListDtoSchema.parse(await response.json());
+    taskList = dto.tasks;
+    selectedTaskId = pickSelectedTaskId(dto.tasks, selectedTaskId);
+    await loadSelectedTaskDetail();
+  } catch (error) {
+    tasksViewErrorMessage = error instanceof Error ? error.message : "Unable to load tasks.";
+    taskList = [];
+  } finally {
+    tasksViewLoading = false;
+    renderApp();
+  }
+}
+
 async function loadSelectedTaskDetail(): Promise<void> {
   if (!selectedTaskId) {
     selectedTaskDetail = null;
@@ -99,7 +131,7 @@ async function loadSelectedTaskDetail(): Promise<void> {
   }
 
   try {
-    const response = await fetch(buildApiUrl(`/api/tasks/${encodeURIComponent(selectedTaskId)}`));
+    const response = await fetch(buildTaskDetailUrl(selectedTaskId));
     if (!response.ok) {
       selectedTaskDetail = null;
       return;
@@ -116,7 +148,7 @@ function connectDashboardStream(): void {
   connectionState = "connecting";
   renderApp();
 
-  const streamUrl = buildApiUrl("/api/dashboard/stream", { projectId: DEFAULT_PROJECT_ID });
+  const streamUrl = buildDashboardStreamUrl(DEFAULT_PROJECT_ID);
   dashboardStream = new EventSource(streamUrl);
 
   dashboardStream.addEventListener("dashboard.snapshot", (event) => {
@@ -144,247 +176,156 @@ function connectDashboardStream(): void {
   };
 }
 
+async function loadMcpMeta(): Promise<void> {
+  mcpLoading = true;
+  mcpErrorMessage = "";
+  mcpProjectPath = null;
+  renderApp();
+
+  try {
+    const response = await fetch(buildMetaUrl());
+    if (!response.ok) {
+      throw new Error(`Meta request failed with status ${response.status}.`);
+    }
+    const meta = (await response.json()) as { projectPath?: string };
+    mcpProjectPath = meta.projectPath ?? null;
+  } catch (error) {
+    mcpErrorMessage = error instanceof Error ? error.message : "Unable to load MCP config.";
+  } finally {
+    mcpLoading = false;
+    renderApp();
+  }
+}
+
+async function loadDataForCurrentView(): Promise<void> {
+  switch (currentView) {
+    case "dashboard":
+      await loadDashboardSnapshot();
+      break;
+    case "tasks":
+      await loadTaskList();
+      break;
+    case "agents":
+    case "system-health":
+      if (!dashboardSnapshot) {
+        await loadDashboardSnapshot();
+      }
+      break;
+    case "mcp":
+      await loadMcpMeta();
+      break;
+    case "runs":
+    case "memory":
+    case "settings":
+      break;
+  }
+}
+
+function renderMainContent(): string {
+  switch (currentView) {
+    case "dashboard": {
+      const snapshot = dashboardSnapshot;
+      const allTasks = snapshot?.tasks ?? [];
+      const filteredTasks = filterTasks(allTasks, activeTaskFilter);
+      const selectedTask =
+        filteredTasks.find((t) => t.id === selectedTaskId) ??
+        allTasks.find((t) => t.id === selectedTaskId) ??
+        filteredTasks[0] ??
+        allTasks[0] ??
+        null;
+      return renderDashboardView({
+        snapshot,
+        filteredTasks,
+        activeTaskFilter,
+        selectedTask,
+        selectedTaskDetail,
+        connectionState,
+        errorMessage,
+        isLoading
+      });
+    }
+    case "tasks": {
+      const selectedTask = taskList.find((t) => t.id === selectedTaskId) ?? null;
+      return renderTasksView({
+        tasks: taskList,
+        activeFilter: activeTaskFilter,
+        selectedTaskId: selectedTask?.id ?? selectedTaskId,
+        selectedTaskDetail,
+        errorMessage: tasksViewErrorMessage,
+        isLoading: tasksViewLoading
+      });
+    }
+    case "agents":
+      return renderAgentsView(dashboardSnapshot);
+    case "system-health":
+      return renderSystemHealthView(dashboardSnapshot);
+    case "mcp": {
+      const pathForConfig = mcpProjectPath ?? "<path-to-project>";
+      const config = {
+        mcpServers: {
+          opentasks: {
+            command: "npm",
+            args: ["--prefix", pathForConfig, "run", "start:mcp"]
+          }
+        }
+      };
+      mcpConfigJson = JSON.stringify(config, null, 2);
+      return renderMcpView({
+        projectPath: mcpProjectPath,
+        isLoading: mcpLoading,
+        errorMessage: mcpErrorMessage
+      });
+    }
+    case "runs":
+    case "memory":
+    case "settings":
+      return renderPlaceholderView(getPlaceholderTitle(currentView));
+    default:
+      return renderPlaceholderView("Feature");
+  }
+}
+
+function getPlaceholderTitle(view: ViewId): string {
+  const titles: Record<string, string> = {
+    runs: "Runs",
+    memory: "Memory",
+    settings: "Settings"
+  };
+  return titles[view] ?? "Feature";
+}
+
+function getTopbarProps(): { title: string; subtitle: string } {
+  switch (currentView) {
+    case "dashboard":
+      return { title: "Dashboard", subtitle: "Live dashboard" };
+    case "tasks":
+      return { title: "Tasks", subtitle: "Task list" };
+    case "agents":
+      return { title: "Agents", subtitle: "Agent utilization" };
+    case "system-health":
+      return { title: "System Health", subtitle: "Platform status" };
+    case "mcp":
+      return { title: "MCP", subtitle: "Server setup" };
+    case "runs":
+    case "memory":
+    case "settings":
+      return { title: getPlaceholderTitle(currentView), subtitle: "Coming soon" };
+    default:
+      return { title: "OpenTasks", subtitle: "" };
+  }
+}
+
 function renderApp(): void {
   const snapshot = dashboardSnapshot;
-  const allTasks = snapshot?.tasks ?? [];
-  const filteredTasks = filterTasks(allTasks, activeTaskFilter);
-  const selectedTask =
-    filteredTasks.find((task) => task.id === selectedTaskId) ??
-    allTasks.find((task) => task.id === selectedTaskId) ??
-    filteredTasks[0] ??
-    allTasks[0] ??
-    null;
-  const selectedEvents =
-    selectedTaskDetail && selectedTask && selectedTaskDetail.task?.id === selectedTask.id
-      ? selectedTaskDetail.events
-      : [];
 
   document.documentElement.dataset.theme = activeTheme;
   appRoot.innerHTML = `
     <div class="shell">
-      <aside class="sidebar">
-        <div class="sidebar__brand">
-          <div class="sidebar__logo">${renderIcon("fa-solid fa-brain")}</div>
-          <div>
-            <div class="eyebrow">Workspace</div>
-            <div class="sidebar__title">OpenTasks</div>
-          </div>
-        </div>
-
-        <nav class="nav">
-          ${renderNavSection("Overview", [
-            { label: "Dashboard", icon: "fa-solid fa-table-columns" },
-            { label: "Tasks", icon: "fa-solid fa-list-check" },
-            { label: "Agents", icon: "fa-solid fa-robot" },
-            { label: "Runs", icon: "fa-solid fa-play-circle" }
-          ])}
-          ${renderNavSection("Intelligence", [
-            { label: "Memory", icon: "fa-solid fa-database" },
-            { label: "System Health", icon: "fa-solid fa-heart-pulse" },
-            { label: "Settings", icon: "fa-solid fa-gear" }
-          ])}
-        </nav>
-
-        <section class="sidebar__panel">
-          <div class="eyebrow">Focus</div>
-          <h3>Needs attention</h3>
-          <p>${escapeHtml(buildFocusMessage(snapshot))}</p>
-        </section>
-
-        <div class="sidebar__footer">
-          <button
-            aria-label="${activeTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}"
-            class="button button--ghost sidebar__theme-toggle"
-            data-theme-toggle
-            type="button"
-          >
-            <span class="button__content">${renderIcon(activeTheme === "dark" ? "fa-solid fa-sun" : "fa-solid fa-moon")}</span>
-          </button>
-        </div>
-      </aside>
+      ${renderSidebar(activeTheme, currentView, buildFocusMessage(snapshot))}
 
       <main class="main">
-        <header class="topbar">
-          <div>
-            <div class="eyebrow">Live dashboard</div>
-            <h1>Dashboard</h1>
-          </div>
-
-          <div class="topbar__actions">
-            <label class="search">
-              <span class="search__icon">${renderIcon("fa-solid fa-magnifying-glass")}</span>
-              <input disabled type="search" placeholder="Backend-backed view only" />
-            </label>
-            <button class="button button--primary" disabled title="Observe-only dashboard" type="button">
-              <span class="button__content">
-                ${renderIcon("fa-solid fa-plus")}
-                <span>Create task</span>
-              </span>
-            </button>
-          </div>
-        </header>
-
-        <section class="metric-grid">
-          ${renderMetricCard("Total tasks", snapshot ? String(snapshot.summary.totalTasks) : "--", snapshot ? `${snapshot.summary.availableTasks} available now` : "Loading", "neutral")}
-          ${renderMetricCard("In progress", snapshot ? String(snapshot.summary.inProgressTasks) : "--", snapshot ? `${snapshot.summary.assignedTasks} assigned next` : "Loading", "up")}
-          ${renderMetricCard("Blocked", snapshot ? String(snapshot.summary.blockedTasks) : "--", snapshot ? `${snapshot.summary.failedTasks} failed` : "Loading", snapshot && snapshot.summary.blockedTasks > 0 ? "down" : "neutral")}
-          ${renderMetricCard("Active agents", snapshot ? String(snapshot.summary.activeAgents) : "--", snapshot ? `${snapshot.agents.length} reporting` : "Loading", "up")}
-        </section>
-
-        <section class="content-grid">
-          <div class="stack">
-            <section class="card card--large">
-              <div class="card__header">
-                <div>
-                  <div class="eyebrow">Pipeline</div>
-                  <h2>Task state overview</h2>
-                </div>
-                <span class="status-pill status-pill--health-${connectionState === "connected" ? "healthy" : connectionState === "connecting" ? "degraded" : "warning"}">
-                  ${escapeHtml(connectionState)}
-                </span>
-              </div>
-
-              <div class="pipeline">
-                ${(snapshot?.pipeline ?? []).map(renderPipelineState).join("")}
-              </div>
-            </section>
-
-            <section class="card card--large">
-              <div class="card__header">
-                <div>
-                  <div class="eyebrow">Priority queue</div>
-                  <h2>Tasks</h2>
-                </div>
-                <div class="task-filters">
-                  ${renderFilterChip("all", "All")}
-                  ${renderFilterChip("blocked", "Blocked")}
-                  ${renderFilterChip("in_progress", "In progress")}
-                </div>
-              </div>
-
-              ${
-                errorMessage
-                  ? `<div class="detail-callout"><div class="detail-value">${escapeHtml(errorMessage)}</div></div>`
-                  : ""
-              }
-
-              <div class="task-list" role="list">
-                ${
-                  filteredTasks.length > 0
-                    ? filteredTasks.map((task) => renderTaskRow(task, task.id === selectedTask?.id)).join("")
-                    : `<div class="detail-callout"><div class="detail-value">${isLoading ? "Loading tasks..." : "No tasks match the current filter."}</div></div>`
-                }
-              </div>
-            </section>
-          </div>
-
-          <div class="stack">
-            <section class="card">
-              <div class="card__header">
-                <div>
-                  <div class="eyebrow">Selected task</div>
-                  <h2>${escapeHtml(selectedTask?.title ?? "No task selected")}</h2>
-                </div>
-                ${
-                  selectedTask
-                    ? `<span class="status-pill status-pill--${selectedTask.status}">${escapeHtml(formatStatus(selectedTask.status))}</span>`
-                    : ""
-                }
-              </div>
-
-              ${
-                selectedTask
-                  ? `
-                    <div class="detail-grid">
-                      <div>
-                        <div class="detail-label">Task ID</div>
-                        <div class="detail-value">${escapeHtml(selectedTask.id)}</div>
-                      </div>
-                      <div>
-                        <div class="detail-label">Priority</div>
-                        <div class="detail-value">${escapeHtml(selectedTask.priority)}</div>
-                      </div>
-                      <div>
-                        <div class="detail-label">Assigned</div>
-                        <div class="detail-value">${escapeHtml(selectedTask.assignedTo ?? "Unassigned")}</div>
-                      </div>
-                      <div>
-                        <div class="detail-label">Source</div>
-                        <div class="detail-value">${escapeHtml(selectedTask.source)}</div>
-                      </div>
-                    </div>
-
-                    <p class="detail-summary">${escapeHtml(selectedTask.description || "No description provided for this task.")}</p>
-
-                    <div class="detail-callout">
-                      <div class="detail-label">Blocker</div>
-                      <div class="detail-value">${escapeHtml(selectedTask.blockedReason ?? selectedTask.lastError ?? "No active blocker")}</div>
-                    </div>
-
-                    <div class="timeline">
-                      ${
-                        selectedEvents.length > 0
-                          ? selectedEvents
-                              .map(
-                                (event, index) => `
-                                  <div class="timeline__item">
-                                    <div class="timeline__marker">${index + 1}</div>
-                                    <div>
-                                      <div class="mini-table__title">${escapeHtml(formatTaskEvent(event))}</div>
-                                      <div class="activity-item__detail">${escapeHtml(formatTaskEventDetail(event))}</div>
-                                    </div>
-                                  </div>
-                                `
-                              )
-                              .join("")
-                          : `<div class="detail-summary">No lifecycle events have been recorded for this task yet.</div>`
-                      }
-                    </div>
-                  `
-                  : `<div class="detail-summary">Select a task to inspect its current backend state.</div>`
-              }
-            </section>
-
-            <section class="card">
-              <div class="card__header">
-                <div>
-                  <div class="eyebrow">Live signal</div>
-                  <h2>Recent activity</h2>
-                </div>
-              </div>
-
-              <div class="activity-list">
-                ${(snapshot?.activity ?? []).map(renderActivityItem).join("")}
-              </div>
-            </section>
-
-            <section class="card">
-              <div class="card__header">
-                <div>
-                  <div class="eyebrow">Workload</div>
-                  <h2>Agent utilization</h2>
-                </div>
-              </div>
-
-              <div class="mini-table">
-                ${(snapshot?.agents ?? []).map(renderAgentLoad).join("")}
-              </div>
-            </section>
-
-            <section class="card">
-              <div class="card__header">
-                <div>
-                  <div class="eyebrow">Platform</div>
-                  <h2>System health</h2>
-                </div>
-              </div>
-
-              <div class="health-list">
-                ${(snapshot?.health ?? []).map(renderHealthItem).join("")}
-              </div>
-            </section>
-          </div>
-        </section>
+        ${renderTopbar(getTopbarProps())}
+        ${renderMainContent()}
       </main>
     </div>
   `;
@@ -396,8 +337,25 @@ function bindEvents(): void {
   const themeToggle = document.querySelector<HTMLButtonElement>("[data-theme-toggle]");
   themeToggle?.addEventListener("click", () => {
     activeTheme = activeTheme === "light" ? "dark" : "light";
-    window.localStorage.setItem("opentasks-theme", activeTheme);
+    persistTheme(activeTheme);
     renderApp();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const view = button.dataset.view as ViewId | undefined;
+      if (!view) return;
+      currentView = view;
+
+      if (view === "dashboard" && !dashboardStream) {
+        connectDashboardStream();
+      } else if (view !== "dashboard" && dashboardStream) {
+        dashboardStream.close();
+        dashboardStream = null;
+      }
+
+      void loadDataForCurrentView().then(renderApp);
+    });
   });
 
   document.querySelectorAll<HTMLButtonElement>("[data-task-id]").forEach((button) => {
@@ -408,216 +366,33 @@ function bindEvents(): void {
     });
   });
 
+  document.querySelector<HTMLButtonElement>("[data-copy-mcp]")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(mcpConfigJson);
+      const btn = document.querySelector("[data-copy-mcp]");
+      if (btn) {
+        const content = btn.querySelector(".button__content");
+        const originalHtml = content?.innerHTML ?? "";
+        if (content) {
+          content.innerHTML = '<i class="fa-solid fa-check fa-fw" aria-hidden="true"></i><span>Copied!</span>';
+          setTimeout(() => {
+            content.innerHTML = originalHtml;
+          }, 1500);
+        }
+      }
+    } catch {
+      /* clipboard not available */
+    }
+  });
+
   document.querySelectorAll<HTMLButtonElement>("[data-filter]").forEach((button) => {
     button.addEventListener("click", () => {
       activeTaskFilter = (button.dataset.filter as TaskFilter | undefined) ?? activeTaskFilter;
-      renderApp();
+      if (currentView === "tasks") {
+        void loadTaskList();
+      } else {
+        renderApp();
+      }
     });
   });
-}
-
-function renderNavSection(title: string, items: NavItem[]): string {
-  return `
-    <div class="nav__section">
-      <div class="eyebrow">${escapeHtml(title)}</div>
-      ${items
-        .map(
-          (item, index) => `
-            <button class="nav__item ${title === "Overview" && index === 0 ? "nav__item--active" : ""}" type="button">
-              <span class="nav__item-content">
-                <span class="nav__item-icon">${renderIcon(item.icon)}</span>
-                <span>${escapeHtml(item.label)}</span>
-              </span>
-            </button>
-          `
-        )
-        .join("")}
-    </div>
-  `;
-}
-
-function renderMetricCard(
-  label: string,
-  value: string,
-  delta: string,
-  trend: "up" | "down" | "neutral"
-): string {
-  return `
-    <section class="card metric-card">
-      <div class="eyebrow">${escapeHtml(label)}</div>
-      <div class="metric-card__value">${escapeHtml(value)}</div>
-      <div class="metric-card__delta metric-card__delta--${trend}">${escapeHtml(delta)}</div>
-    </section>
-  `;
-}
-
-function renderPipelineState(state: { status: TaskStatus; count: number }): string {
-  return `
-    <div class="pipeline__state">
-      <div class="pipeline__bar pipeline__bar--${state.status}"></div>
-      <div class="pipeline__meta">
-        <span>${escapeHtml(formatStatus(state.status))}</span>
-        <strong>${escapeHtml(String(state.count))}</strong>
-      </div>
-    </div>
-  `;
-}
-
-function renderFilterChip(filter: TaskFilter, label: string): string {
-  return `
-    <button class="chip ${activeTaskFilter === filter ? "chip--active" : ""}" data-filter="${filter}" type="button">
-      ${escapeHtml(label)}
-    </button>
-  `;
-}
-
-function renderTaskRow(task: TaskRecord, isSelected: boolean): string {
-  return `
-    <button class="task-row ${isSelected ? "task-row--selected" : ""}" data-task-id="${escapeHtml(task.id)}" type="button" role="listitem">
-      <div class="task-row__main">
-        <div class="task-row__title">${escapeHtml(task.title)}</div>
-        <div class="task-row__meta">
-          ${escapeHtml(task.id)} | ${escapeHtml(task.assignedTo ?? "Unassigned")} | Updated ${escapeHtml(formatRelativeTime(task.updatedAt))}
-        </div>
-      </div>
-      <div class="task-row__stats">
-        <span class="status-pill status-pill--${task.status}">${escapeHtml(formatStatus(task.status))}</span>
-        <span class="task-row__score">${escapeHtml(task.priority)}</span>
-        <span class="task-row__age">${escapeHtml(formatRelativeTime(task.createdAt))}</span>
-      </div>
-    </button>
-  `;
-}
-
-function renderActivityItem(item: DashboardSnapshotDto["activity"][number]): string {
-  return `
-    <div class="activity-item">
-      <div class="activity-item__time">${escapeHtml(formatRelativeTime(item.event.createdAt))}</div>
-      <div>
-        <div class="activity-item__title">${escapeHtml(formatTaskEvent(item.event))}</div>
-        <div class="activity-item__detail">${escapeHtml(item.taskTitle ?? item.taskId)}</div>
-      </div>
-    </div>
-  `;
-}
-
-function renderAgentLoad(agent: DashboardSnapshotDto["agents"][number]): string {
-  return `
-    <div class="mini-table__row">
-      <div>
-        <div class="mini-table__title">${escapeHtml(agent.agentName)}</div>
-        <div class="mini-table__subtitle">
-          ${escapeHtml(`${agent.assignedTasks} assigned | ${agent.inProgressTasks} active | ${agent.completedTasks} completed`)}
-        </div>
-      </div>
-      <div class="mini-table__metric">${escapeHtml(String(agent.failedTasks))} failed</div>
-    </div>
-  `;
-}
-
-function renderHealthItem(item: DashboardHealthItemDto): string {
-  return `
-    <div class="health-item">
-      <div>
-        <div class="mini-table__title">${escapeHtml(item.name)}</div>
-        <div class="mini-table__subtitle">${escapeHtml(item.detail)}</div>
-      </div>
-      <span class="status-pill status-pill--health-${item.state}">${escapeHtml(formatHealthState(item.state))}</span>
-    </div>
-  `;
-}
-
-function filterTasks(tasks: TaskRecord[], filter: TaskFilter): TaskRecord[] {
-  if (filter === "all") {
-    return tasks;
-  }
-
-  return tasks.filter((task) => task.status === filter);
-}
-
-function pickSelectedTaskId(tasks: TaskRecord[], currentTaskId: string): string {
-  return tasks.find((task) => task.id === currentTaskId)?.id ?? tasks[0]?.id ?? "";
-}
-
-function buildFocusMessage(snapshot: DashboardSnapshotDto | null): string {
-  if (!snapshot) {
-    return "Loading backend task data and live coordination state.";
-  }
-
-  if (snapshot.summary.blockedTasks > 0 || snapshot.summary.failedTasks > 0) {
-    return `${snapshot.summary.blockedTasks} blocked task(s) and ${snapshot.summary.failedTasks} failed task(s) need attention.`;
-  }
-
-  return `${snapshot.summary.availableTasks} task(s) are available and ${snapshot.summary.activeAgents} agent(s) are active.`;
-}
-
-function buildApiUrl(path: string, query?: Record<string, string | undefined>): string {
-  const url = new URL(path, API_BASE_URL);
-
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value) {
-      url.searchParams.set(key, value);
-    }
-  }
-
-  return url.toString();
-}
-
-function formatStatus(status: TaskStatus): string {
-  return status.replaceAll("_", " ");
-}
-
-function formatHealthState(state: DashboardHealthItemDto["state"]): string {
-  return state.charAt(0).toUpperCase() + state.slice(1);
-}
-
-function formatRelativeTime(timestamp: string | null): string {
-  if (!timestamp) {
-    return "Unknown";
-  }
-
-  const diffMs = Date.now() - new Date(timestamp).getTime();
-  const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
-
-  if (diffMinutes < 1) {
-    return "just now";
-  }
-
-  if (diffMinutes < 60) {
-    return `${diffMinutes}m ago`;
-  }
-
-  const diffHours = Math.round(diffMinutes / 60);
-  if (diffHours < 24) {
-    return `${diffHours}h ago`;
-  }
-
-  const diffDays = Math.round(diffHours / 24);
-  return `${diffDays}d ago`;
-}
-
-function formatTaskEvent(event: TaskEvent): string {
-  const action = event.eventType.replace("task_", "").replaceAll("_", " ");
-  return `${action.charAt(0).toUpperCase()}${action.slice(1)}`;
-}
-
-function formatTaskEventDetail(event: TaskEvent): string {
-  if (event.actorId) {
-    return `${event.actorType} ${event.actorId} at ${formatRelativeTime(event.createdAt)}`;
-  }
-
-  return `${event.actorType} event at ${formatRelativeTime(event.createdAt)}`;
-}
-
-function renderIcon(iconClassName: string): string {
-  return `<i class="${iconClassName} fa-fw" aria-hidden="true"></i>`;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }

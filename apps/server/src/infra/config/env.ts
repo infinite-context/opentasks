@@ -3,7 +3,7 @@ export interface AppEnv {
   appVersion: string;
   environment: string;
   mcpEnabled: boolean;
-  storageDriver: "memory" | "postgres";
+  storageDriver: "memory" | "sqlite";
   databaseUrl: string | null;
   autoMigrate: boolean;
   seedDemoData: boolean;
@@ -13,7 +13,7 @@ export interface AppEnv {
 }
 
 export function loadEnv(): AppEnv {
-  const databaseUrl = process.env.OPENTASKS_DATABASE_URL ?? process.env.DATABASE_URL ?? null;
+  const databaseUrl = process.env.OPENTASKS_DATABASE_URL ?? process.env.DATABASE_URL ?? "./data/opentasks.db";
 
   return {
     appName: process.env.OPENTASKS_APP_NAME ?? "opentasks",
@@ -26,7 +26,7 @@ export function loadEnv(): AppEnv {
     seedDemoData: parseBoolean(process.env.OPENTASKS_SEED_DEMO_DATA, true),
     defaultLeaseDurationSeconds: parseInteger(process.env.OPENTASKS_DEFAULT_LEASE_SECONDS, 900),
     httpEnabled: parseBoolean(process.env.OPENTASKS_HTTP_ENABLED, true),
-    httpPort: parseInteger(process.env.OPENTASKS_HTTP_PORT, 3001)
+    httpPort: parseInteger(process.env.OPENTASKS_HTTP_PORT, 3005)
   };
 }
 
@@ -48,12 +48,12 @@ function parseInteger(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function resolveStorageDriver(databaseUrl: string | null): "memory" | "postgres" {
+function resolveStorageDriver(databaseUrl: string | null): "memory" | "sqlite" {
   const configuredDriver = process.env.OPENTASKS_STORAGE_DRIVER;
 
-  if (configuredDriver === "memory" || configuredDriver === "postgres") {
+  if (configuredDriver === "memory" || configuredDriver === "sqlite") {
     return configuredDriver;
   }
 
-  return databaseUrl ? "postgres" : "memory";
+  return databaseUrl ? "sqlite" : "memory";
 }

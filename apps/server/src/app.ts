@@ -1,9 +1,13 @@
-import { Pool } from "pg";
+import Database from "better-sqlite3";
+import { mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { cwd as getCwd } from "node:process";
+import { fileURLToPath } from "node:url";
 import { loadEnv } from "./infra/config";
 import { createLogger } from "./infra/logging";
 import { createInMemoryTaskStore } from "./infra/storage/in-memory-task-store";
-import { createPostgresTaskDatabase } from "./infra/storage/postgres-task-database";
-import { applyPostgresSchema, seedPostgresDemoData } from "./infra/storage/postgres-schema";
+import { createSqliteTaskDatabase } from "./infra/storage/sqlite-task-database";
+import { applySqliteSchema, seedSqliteDemoData } from "./infra/storage/sqlite-schema";
 import { createDashboardQueryService } from "./system/dashboard-query-service";
 import { createExecutionLoop } from "./system/execution-loop";
 import { createTaskListManager } from "./system/task-list-manager";
@@ -13,20 +17,39 @@ import { createTaskRuntimeService } from "./system/task-runtime-service";
 import { createHttpTransport } from "./transport/http";
 import { createMcpTransport } from "./transport/mcp";
 
+import type { AppEnv } from "./infra/config";
+
 export interface App {
   run(): Promise<void>;
 }
 
-export function createApp(): App {
-  const env = loadEnv();
+export function createApp(overrides?: Partial<AppEnv>): App {
+  const env = { ...loadEnv(), ...overrides };
   const logger = createLogger();
-  const pool =
-    env.storageDriver === "postgres" && env.databaseUrl
-      ? new Pool({ connectionString: env.databaseUrl })
-      : null;
+  let db: Database.Database | null = null;
+  if (env.storageDriver === "sqlite" && env.databaseUrl) {
+    try {
+      // Resolve the database path relative to the .env file location (apps/server)
+      // to ensure all processes use the exact same file regardless of where they are started from.
+      const __dirname = dirname(fileURLToPath(import.meta.url));
+      const dbPath = resolve(__dirname, "../../", env.databaseUrl);
+      
+      mkdirSync(dirname(dbPath), { recursive: true });
+      db = new Database(dbPath);
+      logger.info("bootstrap", `Connected to SQLite database at ${dbPath}`);
+    } catch (err) {
+      logger.info("bootstrap", `Failed to initialize SQLite database at ${env.databaseUrl}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  if (env.storageDriver === "sqlite" && !db) {
+    logger.info("bootstrap", "SQLite storage driver requested but no database URL provided. Falling back to memory storage.");
+    env.storageDriver = "memory";
+  }
+
   const taskStore =
-    env.storageDriver === "postgres" && pool
-      ? createPostgresTaskDatabase({ logger, pool })
+    env.storageDriver === "sqlite" && db
+      ? createSqliteTaskDatabase({ logger, db })
       : createInMemoryTaskStore({ logger });
 
   const taskListManager = createTaskListManager({ logger, taskStore });
@@ -58,11 +81,13 @@ export function createApp(): App {
         taskRuntimeService
       })
     : null;
+  const projectPath = process.env.OPENTASKS_PROJECT_PATH ?? getCwd();
   const httpTransport = env.httpEnabled
     ? createHttpTransport({
         logger,
         appName: env.appName,
         appVersion: env.appVersion,
+        projectPath,
         port: env.httpPort,
         dashboardQueryService,
         taskQueryService
@@ -75,13 +100,13 @@ export function createApp(): App {
       logger.info("bootstrap", `Starting ${env.appName} backend in ${env.environment} mode.`);
       logger.info("bootstrap", `Using ${env.storageDriver} task storage.`);
 
-      if (pool) {
+      if (db) {
         if (env.autoMigrate) {
-          await applyPostgresSchema(pool, logger);
+          applySqliteSchema(db, logger);
         }
 
         if (env.seedDemoData) {
-          await seedPostgresDemoData(pool, logger);
+          seedSqliteDemoData(db, logger);
         }
       }
 
@@ -101,7 +126,7 @@ export function createApp(): App {
       await waitForShutdownSignal();
       await httpTransport?.close();
       await mcpTransport?.close();
-      await pool?.end();
+      db?.close();
     }
   };
 }

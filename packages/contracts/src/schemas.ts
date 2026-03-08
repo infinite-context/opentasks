@@ -86,6 +86,14 @@ export const memoryArtifactSchema = z.object({
   source: z.literal("contextual-indexing")
 });
 
+export const createTaskInputSchema = z.object({
+  projectId: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
+  dependencyIds: z.array(z.string().min(1)).optional()
+});
+
 export const taskRequestSchema = z.object({
   agentName: z.string().min(1),
   projectId: z.string().min(1),

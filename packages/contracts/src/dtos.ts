@@ -8,6 +8,14 @@ import type {
   TaskStatus
 } from "./types";
 
+export interface CreateTaskInput {
+  projectId: string;
+  title: string;
+  description?: string;
+  priority?: TaskRecord["priority"];
+  dependencyIds?: string[];
+}
+
 export interface TaskRequest {
   agentName: string;
   projectId: string;

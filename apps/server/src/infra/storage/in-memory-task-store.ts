@@ -9,6 +9,7 @@ import type {
   TaskRecord
 } from "../../shared/types";
 import type {
+  CreateTaskInput,
   TaskClaimOptions,
   TaskCompletion,
   TaskFailure,
@@ -164,6 +165,47 @@ export function createInMemoryTaskStore({
   ];
 
   return {
+    async createTask(input: CreateTaskInput): Promise<TaskRecord | null> {
+      const projectId = resolveProjectId(projects, input.projectId);
+      if (!projectId) {
+        logger.step(
+          "storage:in-memory-task-store",
+          `Cannot create task: project "${input.projectId}" not found.`
+        );
+        return null;
+      }
+
+      const now = currentTimestamp();
+      const task: TaskRecord = {
+        id: createLocalId("task"),
+        createdAt: now,
+        updatedAt: now,
+        projectId,
+        title: input.title,
+        description: input.description ?? "",
+        status: "available",
+        priority: input.priority ?? "P2",
+        availableAt: now,
+        assignedTo: null,
+        assignedAt: null,
+        leaseExpiresAt: null,
+        startedAt: null,
+        completedAt: null,
+        failedAt: null,
+        blockedReason: null,
+        lastError: null,
+        source: "manual",
+        metadata: {},
+        dependencyIds: input.dependencyIds ?? []
+      };
+
+      tasks.push(task);
+      events.push(createEvent(task, "task_created", "system", null));
+      events.push(createEvent(task, "task_available", "system", null));
+
+      logger.step("storage:in-memory-task-store", `Created task "${task.id}" in project "${input.projectId}".`);
+      return cloneTask(task);
+    },
     async claimNextTask(projectRef, agentName, options): Promise<ClaimedTask | null> {
       logger.step(
         "storage:in-memory-task-store",

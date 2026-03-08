@@ -7,9 +7,9 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --radius-lg: 18px;
-  --radius-md: 14px;
-  --radius-sm: 10px;
+  --radius-lg: 8px;
+  --radius-md: 6px;
+  --radius-sm: 4px;
   --shadow-soft: 0 16px 40px rgba(15, 23, 42, 0.08);
   --sidebar-width: 248px;
   --bg-glow: rgba(99, 91, 255, 0.1);
@@ -48,13 +48,13 @@
   --text: #f3f4f6;
   --text-muted: #a1a1aa;
   --text-soft: #71717a;
-  --accent: #8b82ff;
-  --accent-soft: rgba(139, 130, 255, 0.16);
+  --accent: #a78bfa;
+  --accent-soft: rgba(167, 139, 250, 0.12);
   --success: #34d399;
-  --warning: #f59e0b;
+  --warning: #fbbf24;
   --danger: #f87171;
-  --info: #60a5fa;
-  --bg-glow: rgba(255, 255, 255, 0.025);
+  --info: #94a3b8;
+  --bg-glow: rgba(255, 255, 255, 0.02);
 }
 
 * {
@@ -120,7 +120,7 @@ button {
   place-items: center;
   width: 2.75rem;
   height: 2.75rem;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: linear-gradient(135deg, var(--accent), #9f97ff);
   color: white;
   font-weight: 700;
@@ -156,7 +156,7 @@ button {
   background: transparent;
   text-align: left;
   padding: 0.7rem 0.85rem;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--text-muted);
   cursor: pointer;
   transition:
@@ -333,7 +333,7 @@ button {
   flex: 0 0 auto;
   background: var(--accent);
   color: white;
-  box-shadow: 0 14px 28px rgba(99, 91, 255, 0.24);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .metric-grid,
@@ -429,13 +429,13 @@ button {
 
 .pipeline__bar--hydrating,
 .status-pill--hydrating {
-  background: rgba(59, 130, 246, 0.14);
-  color: var(--info);
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-muted);
 }
 
 .pipeline__bar--assigned,
 .status-pill--assigned {
-  background: rgba(99, 91, 255, 0.18);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -465,8 +465,8 @@ button {
 
 .pipeline__bar--available,
 .status-pill--available {
-  background: rgba(37, 99, 235, 0.14);
-  color: var(--info);
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-muted);
 }
 
 .pipeline__bar--pending,
@@ -589,8 +589,8 @@ button {
 }
 
 .status-pill--health-degraded {
-  background: rgba(59, 130, 246, 0.14);
-  color: var(--info);
+  background: rgba(251, 191, 36, 0.14);
+  color: var(--warning);
 }
 
 .status-pill--health-warning {
@@ -628,6 +628,34 @@ button {
   border-radius: var(--radius-md);
   background: var(--surface-soft);
   border: 1px solid var(--border);
+}
+
+.mcp-config-block {
+  position: relative;
+  margin-bottom: 1rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.mcp-config__pre {
+  margin: 0;
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.mcp-config__code {
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+  color: var(--text);
+}
+
+.mcp-config__copy {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
 }
 
 .timeline,
