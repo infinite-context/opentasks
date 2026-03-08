@@ -61,7 +61,7 @@ As the project expands, use this layout:
     worker/                # Optional async/background runtime
     web/                   # Optional UI or admin app
   packages/
-    contracts/             # Shared DTOs, schemas, MCP contracts
+    contracts/             # Canonical cross-app primitives, types, DTOs, and schemas
     sdk/                   # Client helpers for external agents
     config/                # Shared config utilities
     testing/               # Shared test helpers and fixtures
@@ -158,6 +158,19 @@ Use:
 
 Rule: if a shape represents stored entity state, it belongs in `types.ts`. If a shape represents input/output across a boundary, it belongs in `dtos.ts`.
 
+### Cross-app contract package
+
+When contracts are shared across the backend and frontend, `packages/contracts` becomes the canonical source of truth.
+
+Use:
+
+- `packages/contracts/src/primitives.ts` for structural base interfaces
+- `packages/contracts/src/types.ts` for canonical persisted and domain models
+- `packages/contracts/src/dtos.ts` for shared command, query, and aggregate response shapes
+- `packages/contracts/src/schemas.ts` for runtime validation schemas shared by transports
+
+Rule: `apps/server/src/shared/*` may exist as app-local facades or re-exports, but the authoritative cross-app definitions must live in `packages/contracts`.
+
 ## Dependency rules
 
 Dependencies must move inward toward business logic through interfaces, not outward through implementation leakage.
@@ -233,6 +246,12 @@ If adding HTTP, queue consumers, CLI commands, or another protocol:
 - call system components only through their public interfaces
 - do not embed business rules in transport handlers
 
+For browser-facing transports specifically:
+
+- keep the browser on HTTP/SSE rather than direct MCP
+- expose aggregate read models that contain canonical entities rather than frontend-only copies
+- validate request/query shapes with shared schemas from `packages/contracts`
+
 ### Add a new system capability
 
 If adding a new workflow or business process:
@@ -291,6 +310,10 @@ Rule: persisted models should extend at least `IdentityModel`. Persisted models 
 
 Rule: request objects, mutation payloads, and transport responses should be modeled as DTOs rather than entity types.
 
+Rule: if a model represents a real domain object such as a project, task, or task event, define it once and reuse it everywhere. Do not create frontend-specific copies of canonical backend entity models.
+
+Rule: aggregate dashboard/query DTOs are allowed, but they should wrap canonical entities rather than redefine them.
+
 Rule: if a type crosses more than one app boundary, move it into `packages/contracts` and back it with runtime validation when appropriate.
 
 ## Composition rules
@@ -307,6 +330,8 @@ Continue using the root composition pattern:
 - construct infra implementations
 - construct system services
 - wire transports and loops
+
+Current composition should support multiple active transports in one process when needed, such as MCP for agents and HTTP/SSE for the web UI, with both depending on the same canonical contracts and service layer.
 
 Rule: feature modules should not instantiate their own databases, provider clients, or sibling services unless there is an explicit factory boundary for that purpose.
 
@@ -325,6 +350,7 @@ Guidelines:
 - use one adapter per responsibility where practical
 - let the database generate persisted identifiers on insert and hydrate the created model from the returned row
 - use prefixed object identifiers for persisted records, following the Stripe-style pattern such as `task_<id>` or `project_<id>`
+- keep canonical persisted model definitions aligned with the database-backed source of truth before deriving browser aggregates from them
 
 Examples:
 

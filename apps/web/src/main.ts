@@ -1,244 +1,43 @@
 import "@fortawesome/fontawesome-free/css/all.min.css";
+import {
+  dashboardSnapshotDtoSchema,
+  dashboardStreamEventDtoSchema,
+  taskDetailDtoSchema,
+  type DashboardHealthItemDto,
+  type DashboardSnapshotDto,
+  type TaskDetailDto,
+  type TaskEvent,
+  type TaskRecord,
+  type TaskStatus
+} from "@opentasks/contracts";
 import "./style.css";
 
 type Theme = "light" | "dark";
-type TaskStatus =
-  | "available"
-  | "hydrating"
-  | "assigned"
-  | "in_progress"
-  | "blocked"
-  | "completed"
-  | "indexing";
-type HealthState = "healthy" | "degraded" | "warning";
-
-interface Metric {
-  label: string;
-  value: string;
-  delta: string;
-  trend: "up" | "down" | "neutral";
-}
-
-interface PipelineState {
-  label: string;
-  value: number;
-  tone: TaskStatus;
-}
-
-interface Task {
-  id: string;
-  title: string;
-  status: TaskStatus;
-  priority: "P0" | "P1" | "P2";
-  agent: string;
-  age: string;
-  updated: string;
-  contextScore: number;
-  blockedBy: string | null;
-  summary: string;
-  timeline: string[];
-}
-
-interface ActivityItem {
-  time: string;
-  title: string;
-  detail: string;
-}
-
-interface AgentLoad {
-  name: string;
-  assigned: number;
-  active: number;
-  efficiency: string;
-}
-
-interface HealthItem {
-  name: string;
-  state: HealthState;
-  detail: string;
-}
-
-interface DashboardData {
-  metrics: Metric[];
-  pipeline: PipelineState[];
-  tasks: Task[];
-  activity: ActivityItem[];
-  agents: AgentLoad[];
-  health: HealthItem[];
-}
+type TaskFilter = "all" | "blocked" | "in_progress";
+type ConnectionState = "connecting" | "connected" | "disconnected";
 
 interface NavItem {
   label: string;
   icon: string;
 }
 
-const dashboardData: DashboardData = {
-  metrics: [
-    { label: "Open tasks", value: "42", delta: "+6 this week", trend: "up" },
-    { label: "In progress", value: "9", delta: "3 agents active", trend: "neutral" },
-    { label: "Blocked", value: "4", delta: "-2 since yesterday", trend: "down" },
-    { label: "Indexed today", value: "26", delta: "+18% learning rate", trend: "up" }
-  ],
-  pipeline: [
-    { label: "Available", value: 18, tone: "available" },
-    { label: "Hydrating", value: 5, tone: "hydrating" },
-    { label: "Assigned", value: 7, tone: "assigned" },
-    { label: "In progress", value: 9, tone: "in_progress" },
-    { label: "Blocked", value: 4, tone: "blocked" },
-    { label: "Indexing", value: 3, tone: "indexing" },
-    { label: "Completed", value: 12, tone: "completed" }
-  ],
-  tasks: [
-    {
-      id: "TASK-214",
-      title: "Hydrate task dependency graph for billing import flow",
-      status: "in_progress",
-      priority: "P0",
-      agent: "Claude Code",
-      age: "28m",
-      updated: "2 minutes ago",
-      contextScore: 91,
-      blockedBy: null,
-      summary: "High-priority orchestration task with strong context coverage and active execution.",
-      timeline: [
-        "Task claimed by Task List Manager",
-        "Context hydrated from 6 related memories",
-        "Assigned to Claude Code",
-        "Execution started with dependency graph attached"
-      ]
-    },
-    {
-      id: "TASK-208",
-      title: "Retry indexing for failed memory artifact batch",
-      status: "blocked",
-      priority: "P0",
-      agent: "Internal Agent",
-      age: "1h 14m",
-      updated: "11 minutes ago",
-      contextScore: 48,
-      blockedBy: "Vector DB write timeout",
-      summary: "Learning loop task is stalled and should be surfaced prominently in the dashboard.",
-      timeline: [
-        "Completed run received through MCP",
-        "Indexer generated 4 candidate artifacts",
-        "Vector write degraded after partial insert",
-        "Task moved to blocked pending retry policy"
-      ]
-    },
-    {
-      id: "TASK-217",
-      title: "Prepare next context packet for server bootstrap workflow",
-      status: "hydrating",
-      priority: "P1",
-      agent: "System",
-      age: "9m",
-      updated: "just now",
-      contextScore: 77,
-      blockedBy: null,
-      summary: "Hydration-in-flight task that demonstrates early pipeline visibility before assignment.",
-      timeline: [
-        "Task selected for project opentasks",
-        "Context Hydrator requested vector search",
-        "3 memory candidates returned",
-        "Hydration packet being assembled"
-      ]
-    },
-    {
-      id: "TASK-203",
-      title: "Persist orchestration checkpoints to PostgreSQL",
-      status: "assigned",
-      priority: "P1",
-      agent: "GPT-5.4",
-      age: "42m",
-      updated: "7 minutes ago",
-      contextScore: 84,
-      blockedBy: null,
-      summary: "Assigned engineering task waiting on execution handoff completion.",
-      timeline: [
-        "Task claimed for backend stream",
-        "Hydration completed successfully",
-        "Assigned to GPT-5.4",
-        "Awaiting first run event"
-      ]
-    },
-    {
-      id: "TASK-198",
-      title: "Backfill vector metadata for existing reusable memory",
-      status: "completed",
-      priority: "P2",
-      agent: "Internal Agent",
-      age: "Completed",
-      updated: "24 minutes ago",
-      contextScore: 96,
-      blockedBy: null,
-      summary: "Completed indexing-related task with high confidence context and no blockers.",
-      timeline: [
-        "Task hydrated with historical memory context",
-        "Internal agent generated metadata update set",
-        "Vector records updated",
-        "Artifacts marked reusable"
-      ]
-    },
-    {
-      id: "TASK-220",
-      title: "Select next available task for MCP request backlog",
-      status: "available",
-      priority: "P2",
-      agent: "Unassigned",
-      age: "5m",
-      updated: "5 minutes ago",
-      contextScore: 63,
-      blockedBy: null,
-      summary: "Queue-ready task available for assignment and useful as a baseline dashboard state.",
-      timeline: [
-        "Task entered queue",
-        "Dependencies resolved",
-        "Ready for selection",
-        "Awaiting orchestrator claim"
-      ]
-    }
-  ],
-  activity: [
-    {
-      time: "2m ago",
-      title: "Hydration completed for TASK-214",
-      detail: "6 memories attached, context score improved to 91."
-    },
-    {
-      time: "7m ago",
-      title: "TASK-203 assigned to GPT-5.4",
-      detail: "Execution handoff sent through MCP transport."
-    },
-    {
-      time: "11m ago",
-      title: "Vector DB write timeout",
-      detail: "TASK-208 moved to blocked and flagged for retry."
-    },
-    {
-      time: "18m ago",
-      title: "12 reusable artifacts created",
-      detail: "Indexer completed a high-confidence learning batch."
-    }
-  ],
-  agents: [
-    { name: "Claude Code", assigned: 4, active: 2, efficiency: "92%" },
-    { name: "GPT-5.4", assigned: 3, active: 1, efficiency: "88%" },
-    { name: "Internal Agent", assigned: 6, active: 3, efficiency: "95%" }
-  ],
-  health: [
-    { name: "MCP server", state: "healthy", detail: "Request latency 120ms" },
-    { name: "Task orchestrator", state: "healthy", detail: "No assignment backlog" },
-    { name: "Vector DB", state: "warning", detail: "Intermittent write timeouts" },
-    { name: "Model provider", state: "degraded", detail: "Increased response variance" }
-  ]
-};
+const API_BASE_URL = (import.meta.env.VITE_OPENTASKS_API_BASE_URL as string | undefined) ?? "http://localhost:3001";
+const DEFAULT_PROJECT_ID =
+  (import.meta.env.VITE_OPENTASKS_PROJECT_ID as string | undefined) ?? "demo-project";
 
 const appRoot = getAppRoot();
 
-let selectedTaskId = dashboardData.tasks[0]?.id ?? "";
 let activeTheme = resolveInitialTheme();
+let selectedTaskId = "";
+let activeTaskFilter: TaskFilter = "all";
+let dashboardSnapshot: DashboardSnapshotDto | null = null;
+let selectedTaskDetail: TaskDetailDto | null = null;
+let connectionState: ConnectionState = "connecting";
+let errorMessage = "";
+let isLoading = true;
+let dashboardStream: EventSource | null = null;
 
-renderApp();
+void initializeApp();
 
 function resolveInitialTheme(): Theme {
   const stored = window.localStorage.getItem("opentasks-theme");
@@ -259,8 +58,106 @@ function getAppRoot(): HTMLDivElement {
   return root;
 }
 
+async function initializeApp(): Promise<void> {
+  renderApp();
+  await loadDashboardSnapshot();
+  connectDashboardStream();
+  window.addEventListener("beforeunload", () => {
+    dashboardStream?.close();
+  });
+}
+
+async function loadDashboardSnapshot(): Promise<void> {
+  isLoading = true;
+  errorMessage = "";
+  renderApp();
+
+  try {
+    const response = await fetch(buildApiUrl("/api/dashboard", { projectId: DEFAULT_PROJECT_ID }));
+    if (!response.ok) {
+      throw new Error(`Dashboard request failed with status ${response.status}.`);
+    }
+
+    const snapshot = dashboardSnapshotDtoSchema.parse(await response.json());
+    dashboardSnapshot = snapshot;
+    selectedTaskId = pickSelectedTaskId(snapshot.tasks, selectedTaskId);
+    await loadSelectedTaskDetail();
+    connectionState = "connected";
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : "Unable to load dashboard data.";
+    connectionState = "disconnected";
+  } finally {
+    isLoading = false;
+    renderApp();
+  }
+}
+
+async function loadSelectedTaskDetail(): Promise<void> {
+  if (!selectedTaskId) {
+    selectedTaskDetail = null;
+    return;
+  }
+
+  try {
+    const response = await fetch(buildApiUrl(`/api/tasks/${encodeURIComponent(selectedTaskId)}`));
+    if (!response.ok) {
+      selectedTaskDetail = null;
+      return;
+    }
+
+    selectedTaskDetail = taskDetailDtoSchema.parse(await response.json());
+  } catch {
+    selectedTaskDetail = null;
+  }
+}
+
+function connectDashboardStream(): void {
+  dashboardStream?.close();
+  connectionState = "connecting";
+  renderApp();
+
+  const streamUrl = buildApiUrl("/api/dashboard/stream", { projectId: DEFAULT_PROJECT_ID });
+  dashboardStream = new EventSource(streamUrl);
+
+  dashboardStream.addEventListener("dashboard.snapshot", (event) => {
+    try {
+      const parsed = dashboardStreamEventDtoSchema.parse(JSON.parse((event as MessageEvent).data));
+      dashboardSnapshot = parsed.data;
+      selectedTaskId = pickSelectedTaskId(parsed.data.tasks, selectedTaskId);
+      connectionState = "connected";
+      renderApp();
+      void loadSelectedTaskDetail().then(renderApp);
+    } catch {
+      connectionState = "disconnected";
+      renderApp();
+    }
+  });
+
+  dashboardStream.onopen = () => {
+    connectionState = "connected";
+    renderApp();
+  };
+
+  dashboardStream.onerror = () => {
+    connectionState = "disconnected";
+    renderApp();
+  };
+}
+
 function renderApp(): void {
-  const selectedTask = dashboardData.tasks.find((task) => task.id === selectedTaskId) ?? dashboardData.tasks[0];
+  const snapshot = dashboardSnapshot;
+  const allTasks = snapshot?.tasks ?? [];
+  const filteredTasks = filterTasks(allTasks, activeTaskFilter);
+  const selectedTask =
+    filteredTasks.find((task) => task.id === selectedTaskId) ??
+    allTasks.find((task) => task.id === selectedTaskId) ??
+    filteredTasks[0] ??
+    allTasks[0] ??
+    null;
+  const selectedEvents =
+    selectedTaskDetail && selectedTask && selectedTaskDetail.task?.id === selectedTask.id
+      ? selectedTaskDetail.events
+      : [];
 
   document.documentElement.dataset.theme = activeTheme;
   appRoot.innerHTML = `
@@ -291,15 +188,17 @@ function renderApp(): void {
         <section class="sidebar__panel">
           <div class="eyebrow">Focus</div>
           <h3>Needs attention</h3>
-          <p>4 blocked tasks, 1 degraded provider, and 1 indexing retry waiting for intervention.</p>
+          <p>${escapeHtml(buildFocusMessage(snapshot))}</p>
         </section>
 
         <div class="sidebar__footer">
-          <button class="button button--ghost sidebar__theme-toggle" data-theme-toggle type="button">
-            <span class="button__content">
-              ${renderIcon(activeTheme === "dark" ? "fa-solid fa-sun" : "fa-solid fa-moon")}
-              <span>${activeTheme === "dark" ? "Light mode" : "Dark mode"}</span>
-            </span>
+          <button
+            aria-label="${activeTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}"
+            class="button button--ghost sidebar__theme-toggle"
+            data-theme-toggle
+            type="button"
+          >
+            <span class="button__content">${renderIcon(activeTheme === "dark" ? "fa-solid fa-sun" : "fa-solid fa-moon")}</span>
           </button>
         </div>
       </aside>
@@ -307,16 +206,16 @@ function renderApp(): void {
       <main class="main">
         <header class="topbar">
           <div>
-            <div class="eyebrow">Today</div>
-            <h1>Task orchestration dashboard</h1>
+            <div class="eyebrow">Live dashboard</div>
+            <h1>Dashboard</h1>
           </div>
 
           <div class="topbar__actions">
             <label class="search">
               <span class="search__icon">${renderIcon("fa-solid fa-magnifying-glass")}</span>
-              <input type="search" placeholder="Search tasks, agents, runs" />
+              <input disabled type="search" placeholder="Backend-backed view only" />
             </label>
-            <button class="button button--primary" type="button">
+            <button class="button button--primary" disabled title="Observe-only dashboard" type="button">
               <span class="button__content">
                 ${renderIcon("fa-solid fa-plus")}
                 <span>Create task</span>
@@ -326,7 +225,10 @@ function renderApp(): void {
         </header>
 
         <section class="metric-grid">
-          ${dashboardData.metrics.map(renderMetricCard).join("")}
+          ${renderMetricCard("Total tasks", snapshot ? String(snapshot.summary.totalTasks) : "--", snapshot ? `${snapshot.summary.availableTasks} available now` : "Loading", "neutral")}
+          ${renderMetricCard("In progress", snapshot ? String(snapshot.summary.inProgressTasks) : "--", snapshot ? `${snapshot.summary.assignedTasks} assigned next` : "Loading", "up")}
+          ${renderMetricCard("Blocked", snapshot ? String(snapshot.summary.blockedTasks) : "--", snapshot ? `${snapshot.summary.failedTasks} failed` : "Loading", snapshot && snapshot.summary.blockedTasks > 0 ? "down" : "neutral")}
+          ${renderMetricCard("Active agents", snapshot ? String(snapshot.summary.activeAgents) : "--", snapshot ? `${snapshot.agents.length} reporting` : "Loading", "up")}
         </section>
 
         <section class="content-grid">
@@ -337,11 +239,13 @@ function renderApp(): void {
                   <div class="eyebrow">Pipeline</div>
                   <h2>Task state overview</h2>
                 </div>
-                <button class="button button--ghost" type="button">View all tasks</button>
+                <span class="status-pill status-pill--health-${connectionState === "connected" ? "healthy" : connectionState === "connecting" ? "degraded" : "warning"}">
+                  ${escapeHtml(connectionState)}
+                </span>
               </div>
 
               <div class="pipeline">
-                ${dashboardData.pipeline.map(renderPipelineState).join("")}
+                ${(snapshot?.pipeline ?? []).map(renderPipelineState).join("")}
               </div>
             </section>
 
@@ -352,14 +256,24 @@ function renderApp(): void {
                   <h2>Tasks</h2>
                 </div>
                 <div class="task-filters">
-                  <button class="chip chip--active" type="button">All</button>
-                  <button class="chip" type="button">Blocked</button>
-                  <button class="chip" type="button">In progress</button>
+                  ${renderFilterChip("all", "All")}
+                  ${renderFilterChip("blocked", "Blocked")}
+                  ${renderFilterChip("in_progress", "In progress")}
                 </div>
               </div>
 
+              ${
+                errorMessage
+                  ? `<div class="detail-callout"><div class="detail-value">${escapeHtml(errorMessage)}</div></div>`
+                  : ""
+              }
+
               <div class="task-list" role="list">
-                ${dashboardData.tasks.map((task) => renderTaskRow(task, task.id === selectedTask?.id)).join("")}
+                ${
+                  filteredTasks.length > 0
+                    ? filteredTasks.map((task) => renderTaskRow(task, task.id === selectedTask?.id)).join("")
+                    : `<div class="detail-callout"><div class="detail-value">${isLoading ? "Loading tasks..." : "No tasks match the current filter."}</div></div>`
+                }
               </div>
             </section>
           </div>
@@ -369,49 +283,66 @@ function renderApp(): void {
               <div class="card__header">
                 <div>
                   <div class="eyebrow">Selected task</div>
-                  <h2>${selectedTask.title}</h2>
+                  <h2>${escapeHtml(selectedTask?.title ?? "No task selected")}</h2>
                 </div>
-                <span class="status-pill status-pill--${selectedTask.status}">${formatStatus(selectedTask.status)}</span>
+                ${
+                  selectedTask
+                    ? `<span class="status-pill status-pill--${selectedTask.status}">${escapeHtml(formatStatus(selectedTask.status))}</span>`
+                    : ""
+                }
               </div>
 
-              <div class="detail-grid">
-                <div>
-                  <div class="detail-label">Task ID</div>
-                  <div class="detail-value">${selectedTask.id}</div>
-                </div>
-                <div>
-                  <div class="detail-label">Priority</div>
-                  <div class="detail-value">${selectedTask.priority}</div>
-                </div>
-                <div>
-                  <div class="detail-label">Assigned</div>
-                  <div class="detail-value">${selectedTask.agent}</div>
-                </div>
-                <div>
-                  <div class="detail-label">Context score</div>
-                  <div class="detail-value">${selectedTask.contextScore}%</div>
-                </div>
-              </div>
-
-              <p class="detail-summary">${selectedTask.summary}</p>
-
-              <div class="detail-callout">
-                <div class="detail-label">Blocker</div>
-                <div class="detail-value">${selectedTask.blockedBy ?? "No active blocker"}</div>
-              </div>
-
-              <div class="timeline">
-                ${selectedTask.timeline
-                  .map(
-                    (step, index) => `
-                      <div class="timeline__item">
-                        <div class="timeline__marker">${index + 1}</div>
-                        <div>${step}</div>
+              ${
+                selectedTask
+                  ? `
+                    <div class="detail-grid">
+                      <div>
+                        <div class="detail-label">Task ID</div>
+                        <div class="detail-value">${escapeHtml(selectedTask.id)}</div>
                       </div>
-                    `
-                  )
-                  .join("")}
-              </div>
+                      <div>
+                        <div class="detail-label">Priority</div>
+                        <div class="detail-value">${escapeHtml(selectedTask.priority)}</div>
+                      </div>
+                      <div>
+                        <div class="detail-label">Assigned</div>
+                        <div class="detail-value">${escapeHtml(selectedTask.assignedTo ?? "Unassigned")}</div>
+                      </div>
+                      <div>
+                        <div class="detail-label">Source</div>
+                        <div class="detail-value">${escapeHtml(selectedTask.source)}</div>
+                      </div>
+                    </div>
+
+                    <p class="detail-summary">${escapeHtml(selectedTask.description || "No description provided for this task.")}</p>
+
+                    <div class="detail-callout">
+                      <div class="detail-label">Blocker</div>
+                      <div class="detail-value">${escapeHtml(selectedTask.blockedReason ?? selectedTask.lastError ?? "No active blocker")}</div>
+                    </div>
+
+                    <div class="timeline">
+                      ${
+                        selectedEvents.length > 0
+                          ? selectedEvents
+                              .map(
+                                (event, index) => `
+                                  <div class="timeline__item">
+                                    <div class="timeline__marker">${index + 1}</div>
+                                    <div>
+                                      <div class="mini-table__title">${escapeHtml(formatTaskEvent(event))}</div>
+                                      <div class="activity-item__detail">${escapeHtml(formatTaskEventDetail(event))}</div>
+                                    </div>
+                                  </div>
+                                `
+                              )
+                              .join("")
+                          : `<div class="detail-summary">No lifecycle events have been recorded for this task yet.</div>`
+                      }
+                    </div>
+                  `
+                  : `<div class="detail-summary">Select a task to inspect its current backend state.</div>`
+              }
             </section>
 
             <section class="card">
@@ -423,7 +354,7 @@ function renderApp(): void {
               </div>
 
               <div class="activity-list">
-                ${dashboardData.activity.map(renderActivityItem).join("")}
+                ${(snapshot?.activity ?? []).map(renderActivityItem).join("")}
               </div>
             </section>
 
@@ -436,7 +367,7 @@ function renderApp(): void {
               </div>
 
               <div class="mini-table">
-                ${dashboardData.agents.map(renderAgentLoad).join("")}
+                ${(snapshot?.agents ?? []).map(renderAgentLoad).join("")}
               </div>
             </section>
 
@@ -449,7 +380,7 @@ function renderApp(): void {
               </div>
 
               <div class="health-list">
-                ${dashboardData.health.map(renderHealthItem).join("")}
+                ${(snapshot?.health ?? []).map(renderHealthItem).join("")}
               </div>
             </section>
           </div>
@@ -473,6 +404,14 @@ function bindEvents(): void {
     button.addEventListener("click", () => {
       selectedTaskId = button.dataset.taskId ?? selectedTaskId;
       renderApp();
+      void loadSelectedTaskDetail().then(renderApp);
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeTaskFilter = (button.dataset.filter as TaskFilter | undefined) ?? activeTaskFilter;
+      renderApp();
     });
   });
 }
@@ -480,14 +419,14 @@ function bindEvents(): void {
 function renderNavSection(title: string, items: NavItem[]): string {
   return `
     <div class="nav__section">
-      <div class="eyebrow">${title}</div>
+      <div class="eyebrow">${escapeHtml(title)}</div>
       ${items
         .map(
           (item, index) => `
             <button class="nav__item ${title === "Overview" && index === 0 ? "nav__item--active" : ""}" type="button">
               <span class="nav__item-content">
                 <span class="nav__item-icon">${renderIcon(item.icon)}</span>
-                <span>${item.label}</span>
+                <span>${escapeHtml(item.label)}</span>
               </span>
             </button>
           `
@@ -497,88 +436,188 @@ function renderNavSection(title: string, items: NavItem[]): string {
   `;
 }
 
-function renderMetricCard(metric: Metric): string {
+function renderMetricCard(
+  label: string,
+  value: string,
+  delta: string,
+  trend: "up" | "down" | "neutral"
+): string {
   return `
     <section class="card metric-card">
-      <div class="eyebrow">${metric.label}</div>
-      <div class="metric-card__value">${metric.value}</div>
-      <div class="metric-card__delta metric-card__delta--${metric.trend}">${metric.delta}</div>
+      <div class="eyebrow">${escapeHtml(label)}</div>
+      <div class="metric-card__value">${escapeHtml(value)}</div>
+      <div class="metric-card__delta metric-card__delta--${trend}">${escapeHtml(delta)}</div>
     </section>
   `;
 }
 
-function renderPipelineState(state: PipelineState): string {
+function renderPipelineState(state: { status: TaskStatus; count: number }): string {
   return `
     <div class="pipeline__state">
-      <div class="pipeline__bar pipeline__bar--${state.tone}"></div>
+      <div class="pipeline__bar pipeline__bar--${state.status}"></div>
       <div class="pipeline__meta">
-        <span>${state.label}</span>
-        <strong>${state.value}</strong>
+        <span>${escapeHtml(formatStatus(state.status))}</span>
+        <strong>${escapeHtml(String(state.count))}</strong>
       </div>
     </div>
   `;
 }
 
-function renderTaskRow(task: Task, isSelected: boolean): string {
+function renderFilterChip(filter: TaskFilter, label: string): string {
   return `
-    <button class="task-row ${isSelected ? "task-row--selected" : ""}" data-task-id="${task.id}" type="button" role="listitem">
+    <button class="chip ${activeTaskFilter === filter ? "chip--active" : ""}" data-filter="${filter}" type="button">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function renderTaskRow(task: TaskRecord, isSelected: boolean): string {
+  return `
+    <button class="task-row ${isSelected ? "task-row--selected" : ""}" data-task-id="${escapeHtml(task.id)}" type="button" role="listitem">
       <div class="task-row__main">
-        <div class="task-row__title">${task.title}</div>
-        <div class="task-row__meta">${task.id} | ${task.agent} | Updated ${task.updated}</div>
+        <div class="task-row__title">${escapeHtml(task.title)}</div>
+        <div class="task-row__meta">
+          ${escapeHtml(task.id)} | ${escapeHtml(task.assignedTo ?? "Unassigned")} | Updated ${escapeHtml(formatRelativeTime(task.updatedAt))}
+        </div>
       </div>
       <div class="task-row__stats">
-        <span class="status-pill status-pill--${task.status}">${formatStatus(task.status)}</span>
-        <span class="task-row__score">${task.contextScore}%</span>
-        <span class="task-row__age">${task.age}</span>
+        <span class="status-pill status-pill--${task.status}">${escapeHtml(formatStatus(task.status))}</span>
+        <span class="task-row__score">${escapeHtml(task.priority)}</span>
+        <span class="task-row__age">${escapeHtml(formatRelativeTime(task.createdAt))}</span>
       </div>
     </button>
   `;
 }
 
-function renderActivityItem(item: ActivityItem): string {
+function renderActivityItem(item: DashboardSnapshotDto["activity"][number]): string {
   return `
     <div class="activity-item">
-      <div class="activity-item__time">${item.time}</div>
+      <div class="activity-item__time">${escapeHtml(formatRelativeTime(item.event.createdAt))}</div>
       <div>
-        <div class="activity-item__title">${item.title}</div>
-        <div class="activity-item__detail">${item.detail}</div>
+        <div class="activity-item__title">${escapeHtml(formatTaskEvent(item.event))}</div>
+        <div class="activity-item__detail">${escapeHtml(item.taskTitle ?? item.taskId)}</div>
       </div>
     </div>
   `;
 }
 
-function renderAgentLoad(agent: AgentLoad): string {
+function renderAgentLoad(agent: DashboardSnapshotDto["agents"][number]): string {
   return `
     <div class="mini-table__row">
       <div>
-        <div class="mini-table__title">${agent.name}</div>
-        <div class="mini-table__subtitle">${agent.assigned} assigned | ${agent.active} active</div>
+        <div class="mini-table__title">${escapeHtml(agent.agentName)}</div>
+        <div class="mini-table__subtitle">
+          ${escapeHtml(`${agent.assignedTasks} assigned | ${agent.inProgressTasks} active | ${agent.completedTasks} completed`)}
+        </div>
       </div>
-      <div class="mini-table__metric">${agent.efficiency}</div>
+      <div class="mini-table__metric">${escapeHtml(String(agent.failedTasks))} failed</div>
     </div>
   `;
 }
 
-function renderHealthItem(item: HealthItem): string {
+function renderHealthItem(item: DashboardHealthItemDto): string {
   return `
     <div class="health-item">
       <div>
-        <div class="mini-table__title">${item.name}</div>
-        <div class="mini-table__subtitle">${item.detail}</div>
+        <div class="mini-table__title">${escapeHtml(item.name)}</div>
+        <div class="mini-table__subtitle">${escapeHtml(item.detail)}</div>
       </div>
-      <span class="status-pill status-pill--health-${item.state}">${formatHealthState(item.state)}</span>
+      <span class="status-pill status-pill--health-${item.state}">${escapeHtml(formatHealthState(item.state))}</span>
     </div>
   `;
 }
 
-function formatStatus(status: TaskStatus): string {
-  return status.replace("_", " ");
+function filterTasks(tasks: TaskRecord[], filter: TaskFilter): TaskRecord[] {
+  if (filter === "all") {
+    return tasks;
+  }
+
+  return tasks.filter((task) => task.status === filter);
 }
 
-function formatHealthState(state: HealthState): string {
+function pickSelectedTaskId(tasks: TaskRecord[], currentTaskId: string): string {
+  return tasks.find((task) => task.id === currentTaskId)?.id ?? tasks[0]?.id ?? "";
+}
+
+function buildFocusMessage(snapshot: DashboardSnapshotDto | null): string {
+  if (!snapshot) {
+    return "Loading backend task data and live coordination state.";
+  }
+
+  if (snapshot.summary.blockedTasks > 0 || snapshot.summary.failedTasks > 0) {
+    return `${snapshot.summary.blockedTasks} blocked task(s) and ${snapshot.summary.failedTasks} failed task(s) need attention.`;
+  }
+
+  return `${snapshot.summary.availableTasks} task(s) are available and ${snapshot.summary.activeAgents} agent(s) are active.`;
+}
+
+function buildApiUrl(path: string, query?: Record<string, string | undefined>): string {
+  const url = new URL(path, API_BASE_URL);
+
+  for (const [key, value] of Object.entries(query ?? {})) {
+    if (value) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  return url.toString();
+}
+
+function formatStatus(status: TaskStatus): string {
+  return status.replaceAll("_", " ");
+}
+
+function formatHealthState(state: DashboardHealthItemDto["state"]): string {
   return state.charAt(0).toUpperCase() + state.slice(1);
+}
+
+function formatRelativeTime(timestamp: string | null): string {
+  if (!timestamp) {
+    return "Unknown";
+  }
+
+  const diffMs = Date.now() - new Date(timestamp).getTime();
+  const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
+
+  if (diffMinutes < 1) {
+    return "just now";
+  }
+
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function formatTaskEvent(event: TaskEvent): string {
+  const action = event.eventType.replace("task_", "").replaceAll("_", " ");
+  return `${action.charAt(0).toUpperCase()}${action.slice(1)}`;
+}
+
+function formatTaskEventDetail(event: TaskEvent): string {
+  if (event.actorId) {
+    return `${event.actorType} ${event.actorId} at ${formatRelativeTime(event.createdAt)}`;
+  }
+
+  return `${event.actorType} event at ${formatRelativeTime(event.createdAt)}`;
 }
 
 function renderIcon(iconClassName: string): string {
   return `<i class="${iconClassName} fa-fw" aria-hidden="true"></i>`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }

@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { Logger } from "../logging";
 import type {
   ClaimedTask,
+  ProjectRecord,
   TaskEvent,
   TaskEventActorType,
   TaskEventType,
-  TaskRecord,
+  TaskRecord
 } from "../../shared/types";
 import type {
   TaskClaimOptions,
@@ -20,6 +21,30 @@ interface CreateInMemoryTaskStoreParams {
   logger: Logger;
   initialTasks?: TaskRecord[];
 }
+
+function currentTimestamp(): string {
+  return new Date().toISOString();
+}
+
+function createLocalId(prefix: string): string {
+  return `${prefix}_${randomUUID().replace(/-/g, "")}`;
+}
+
+function createProject(key: string, name: string): ProjectRecord {
+  const now = currentTimestamp();
+
+  return {
+    id: createLocalId("project"),
+    key,
+    name,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+const demoProject = createProject("demo-project", "Demo Project");
+const otherProject = createProject("other-project", "Other Project");
+const defaultProjects: ProjectRecord[] = [demoProject, otherProject];
 
 function createTask(
   projectId: string,
@@ -53,27 +78,38 @@ function createTask(
   };
 }
 
-const seededPrimaryTask = createTask("demo-project", "Hydrate the next task with reusable context", {
+const seededPrimaryTask = createTask(demoProject.id, "Hydrate the next task with reusable context", {
   priority: "P0",
-  description: "Seeded task used by the phase one execution path."
+  description: "Seeded task used by the current execution path."
 });
 
-const seededDependentTask = createTask("demo-project", "Prepare a follow-up task for the same project", {
+const seededDependentTask = createTask(demoProject.id, "Prepare a follow-up task for the same project", {
   priority: "P1",
   dependencyIds: [seededPrimaryTask.id]
 });
 
-const seededOtherProjectTask = createTask("other-project", "Unrelated task for another project", {
+const seededOtherProjectTask = createTask(otherProject.id, "Unrelated task for another project", {
   priority: "P2"
 });
 
 const defaultTasks: TaskRecord[] = [seededPrimaryTask, seededDependentTask, seededOtherProjectTask];
+
+function cloneProject(project: ProjectRecord): ProjectRecord {
+  return { ...project };
+}
 
 function cloneTask(task: TaskRecord): TaskRecord {
   return {
     ...task,
     metadata: { ...task.metadata },
     dependencyIds: [...task.dependencyIds]
+  };
+}
+
+function cloneEvent(event: TaskEvent): TaskEvent {
+  return {
+    ...event,
+    payload: { ...event.payload }
   };
 }
 
@@ -103,23 +139,41 @@ function hasSatisfiedDependencies(task: TaskRecord, tasks: TaskRecord[]): boolea
   });
 }
 
+function resolveProjectId(projects: ProjectRecord[], projectRef?: string): string | null {
+  if (!projectRef) {
+    return null;
+  }
+
+  const project = projects.find((candidate) => candidate.id === projectRef || candidate.key === projectRef);
+  return project?.id ?? null;
+}
+
 export function createInMemoryTaskStore({
   logger,
   initialTasks = defaultTasks
 }: CreateInMemoryTaskStoreParams): TaskStore {
+  const projects = defaultProjects.map(cloneProject);
   const tasks = initialTasks.map(cloneTask);
-  const events: TaskEvent[] = [];
+  const events: TaskEvent[] = [
+    createEvent(tasks[0], "task_created", "system", null),
+    createEvent(tasks[0], "task_available", "system", null),
+    createEvent(tasks[1], "task_created", "system", null),
+    createEvent(tasks[1], "task_available", "system", null),
+    createEvent(tasks[2], "task_created", "system", null),
+    createEvent(tasks[2], "task_available", "system", null)
+  ];
 
   return {
-    async claimNextTask(
-      projectId: string,
-      agentName: string,
-      options: TaskClaimOptions
-    ): Promise<ClaimedTask | null> {
+    async claimNextTask(projectRef, agentName, options): Promise<ClaimedTask | null> {
       logger.step(
         "storage:in-memory-task-store",
-        `In-memory task store looks for the next available task in project "${projectId}".`
+        `In-memory task store looks for the next available task in project "${projectRef}".`
       );
+
+      const projectId = resolveProjectId(projects, projectRef);
+      if (!projectId) {
+        return null;
+      }
 
       await this.requeueExpiredTasks(projectId);
 
@@ -133,9 +187,8 @@ export function createInMemoryTaskStore({
       if (!task) {
         logger.step(
           "storage:in-memory-task-store",
-          `In-memory task store found no available task for project "${projectId}".`
+          `In-memory task store found no available task for project "${projectRef}".`
         );
-
         return null;
       }
 
@@ -156,21 +209,26 @@ export function createInMemoryTaskStore({
         })
       );
 
-      logger.step(
-        "storage:in-memory-task-store",
-        `In-memory task store claimed task "${task.id}" for agent "${agentName}".`
-      );
-
       return cloneTask(task) as ClaimedTask;
+    },
+    async getProject(projectRef: string): Promise<ProjectRecord | null> {
+      const project = projects.find((candidate) => candidate.id === projectRef || candidate.key === projectRef);
+      return project ? cloneProject(project) : null;
     },
     async getTaskById(taskId: string): Promise<TaskRecord | null> {
       const task = tasks.find((candidate) => candidate.id === taskId);
       return task ? cloneTask(task) : null;
     },
     async listTasks(filters?: TaskQueryFilters): Promise<TaskRecord[]> {
+      const projectId = resolveProjectId(projects, filters?.projectId);
+
       return tasks
         .filter((task) => {
-          if (filters?.projectId && task.projectId !== filters.projectId) {
+          if (filters?.projectId && projectId && task.projectId !== projectId) {
+            return false;
+          }
+
+          if (filters?.projectId && !projectId) {
             return false;
           }
 
@@ -184,12 +242,12 @@ export function createInMemoryTaskStore({
 
           return true;
         })
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
         .slice(0, filters?.limit ?? tasks.length)
         .map(cloneTask);
     },
     async markTaskInProgress(taskId: string, agentName: string): Promise<TaskRecord | null> {
       const task = tasks.find((candidate) => candidate.id === taskId);
-
       if (!task || task.assignedTo !== agentName || (task.status !== "assigned" && task.status !== "in_progress")) {
         return null;
       }
@@ -200,13 +258,8 @@ export function createInMemoryTaskStore({
       events.push(createEvent(task, "task_started", "agent", agentName));
       return cloneTask(task);
     },
-    async completeTask(
-      taskId: string,
-      agentName: string,
-      completion: TaskCompletion
-    ): Promise<TaskRecord | null> {
+    async completeTask(taskId: string, agentName: string, completion: TaskCompletion): Promise<TaskRecord | null> {
       const task = tasks.find((candidate) => candidate.id === taskId);
-
       if (!task || task.assignedTo !== agentName) {
         return null;
       }
@@ -234,7 +287,6 @@ export function createInMemoryTaskStore({
     },
     async failTask(taskId: string, agentName: string, failure: TaskFailure): Promise<TaskRecord | null> {
       const task = tasks.find((candidate) => candidate.id === taskId);
-
       if (!task || task.assignedTo !== agentName) {
         return null;
       }
@@ -260,7 +312,6 @@ export function createInMemoryTaskStore({
     },
     async releaseTask(taskId: string, agentName: string, release: TaskRelease): Promise<TaskRecord | null> {
       const task = tasks.find((candidate) => candidate.id === taskId);
-
       if (!task || task.assignedTo !== agentName) {
         return null;
       }
@@ -271,8 +322,8 @@ export function createInMemoryTaskStore({
       task.leaseExpiresAt = null;
       task.startedAt = null;
       task.updatedAt = currentTimestamp();
-      task.lastError = release.reason;
       task.availableAt = task.updatedAt;
+      task.lastError = release.reason;
 
       events.push(
         createEvent(task, "task_released", "agent", agentName, {
@@ -283,13 +334,8 @@ export function createInMemoryTaskStore({
 
       return cloneTask(task);
     },
-    async renewTaskLease(
-      taskId: string,
-      agentName: string,
-      leaseDurationSeconds: number
-    ): Promise<TaskRecord | null> {
+    async renewTaskLease(taskId: string, agentName: string, leaseDurationSeconds: number): Promise<TaskRecord | null> {
       const task = tasks.find((candidate) => candidate.id === taskId);
-
       if (!task || task.assignedTo !== agentName || !task.leaseExpiresAt) {
         return null;
       }
@@ -304,7 +350,8 @@ export function createInMemoryTaskStore({
 
       return cloneTask(task);
     },
-    async requeueExpiredTasks(projectId?: string): Promise<number> {
+    async requeueExpiredTasks(projectRef?: string): Promise<number> {
+      const projectId = resolveProjectId(projects, projectRef) ?? projectRef ?? null;
       let updatedCount = 0;
 
       for (const task of tasks) {
@@ -312,11 +359,7 @@ export function createInMemoryTaskStore({
           task.leaseExpiresAt !== null && new Date(task.leaseExpiresAt).getTime() <= Date.now();
         const projectMatches = projectId ? task.projectId === projectId : true;
 
-        if (
-          projectMatches &&
-          leaseExpired &&
-          (task.status === "assigned" || task.status === "in_progress")
-        ) {
+        if (projectMatches && leaseExpired && (task.status === "assigned" || task.status === "in_progress")) {
           task.status = "available";
           task.assignedTo = null;
           task.assignedAt = null;
@@ -332,15 +375,19 @@ export function createInMemoryTaskStore({
       return updatedCount;
     },
     async listTaskEvents(taskId: string): Promise<TaskEvent[]> {
-      return events.filter((event) => event.taskId === taskId).map((event) => ({ ...event, payload: { ...event.payload } }));
+      return events.filter((event) => event.taskId === taskId).map(cloneEvent);
+    },
+    async listProjectTaskEvents(projectRef: string, limit = 20): Promise<TaskEvent[]> {
+      const projectId = resolveProjectId(projects, projectRef);
+      if (!projectId) {
+        return [];
+      }
+
+      return events
+        .filter((event) => event.projectId === projectId)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, limit)
+        .map(cloneEvent);
     }
   };
-}
-
-function createLocalId(prefix: string): string {
-  return `${prefix}_${randomUUID().replace(/-/g, "")}`;
-}
-
-function currentTimestamp(): string {
-  return new Date().toISOString();
 }

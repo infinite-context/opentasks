@@ -4,10 +4,13 @@ import { createLogger } from "./infra/logging";
 import { createInMemoryTaskStore } from "./infra/storage/in-memory-task-store";
 import { createPostgresTaskDatabase } from "./infra/storage/postgres-task-database";
 import { applyPostgresSchema, seedPostgresDemoData } from "./infra/storage/postgres-schema";
+import { createDashboardQueryService } from "./system/dashboard-query-service";
 import { createExecutionLoop } from "./system/execution-loop";
 import { createTaskListManager } from "./system/task-list-manager";
 import { createTaskOrchestrator } from "./system/task-orchestrator";
+import { createTaskQueryService } from "./system/task-query-service";
 import { createTaskRuntimeService } from "./system/task-runtime-service";
+import { createHttpTransport } from "./transport/http";
 import { createMcpTransport } from "./transport/mcp";
 
 export interface App {
@@ -38,13 +41,33 @@ export function createApp(): App {
     taskStore,
     defaultLeaseDurationSeconds: env.defaultLeaseDurationSeconds
   });
-  const mcpTransport = createMcpTransport({
+  const taskQueryService = createTaskQueryService({
     logger,
-    appName: env.appName,
-    appVersion: env.appVersion,
-    executionLoop,
-    taskRuntimeService
+    taskStore
   });
+  const dashboardQueryService = createDashboardQueryService({
+    logger,
+    taskStore
+  });
+  const mcpTransport = env.mcpEnabled
+    ? createMcpTransport({
+        logger,
+        appName: env.appName,
+        appVersion: env.appVersion,
+        executionLoop,
+        taskRuntimeService
+      })
+    : null;
+  const httpTransport = env.httpEnabled
+    ? createHttpTransport({
+        logger,
+        appName: env.appName,
+        appVersion: env.appVersion,
+        port: env.httpPort,
+        dashboardQueryService,
+        taskQueryService
+      })
+    : null;
 
   return {
     async run(): Promise<void> {
@@ -62,11 +85,22 @@ export function createApp(): App {
         }
       }
 
-      await mcpTransport.start();
-      logger.info("bootstrap", "OpenTasks MCP server is ready for task lifecycle requests.");
+      if (mcpTransport) {
+        await mcpTransport.start();
+      }
+      if (httpTransport) {
+        await httpTransport.start();
+      }
+      if (mcpTransport) {
+        logger.info("bootstrap", "OpenTasks MCP server is ready for task lifecycle requests.");
+      }
+      if (httpTransport) {
+        logger.info("bootstrap", "OpenTasks HTTP server is ready for dashboard requests.");
+      }
 
       await waitForShutdownSignal();
-      await mcpTransport.close();
+      await httpTransport?.close();
+      await mcpTransport?.close();
       await pool?.end();
     }
   };

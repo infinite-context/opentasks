@@ -1,6 +1,7 @@
 import type { Logger } from "../logging";
 import type {
   ClaimedTask,
+  ProjectRecord,
   TaskEvent,
   TaskEventActorType,
   TaskEventType,
@@ -45,6 +46,14 @@ interface TaskRow {
   created_at: Date;
   updated_at: Date;
   dependency_ids: string[] | null;
+}
+
+interface ProjectRow {
+  id: string;
+  key: string;
+  name: string;
+  created_at: Date;
+  updated_at: Date;
 }
 
 interface TaskEventRow {
@@ -106,7 +115,12 @@ export function createPostgresTaskDatabase({
       );
 
       return withTransaction(pool, async (client) => {
-        await requeueExpiredTasksInTransaction(client, projectId);
+        const resolvedProjectId = await resolveProjectIdFromClient(client, projectId);
+        if (!resolvedProjectId) {
+          return null;
+        }
+
+        await requeueExpiredTasksInTransaction(client, resolvedProjectId);
 
         const claimResult = await client.query<{ id: string; project_id: string }>(
           `
@@ -148,7 +162,7 @@ export function createPostgresTaskDatabase({
             WHERE t.id = candidate.id
             RETURNING t.id, t.project_id
           `,
-          [projectId, agentName, options.leaseDurationSeconds]
+          [resolvedProjectId, agentName, options.leaseDurationSeconds]
         );
 
         const claimed = claimResult.rows[0];
@@ -173,15 +187,23 @@ export function createPostgresTaskDatabase({
         return task as ClaimedTask | null;
       });
     },
+    async getProject(projectId: string): Promise<ProjectRecord | null> {
+      return getProjectByIdOrKeyFromClient(pool, projectId);
+    },
     async getTaskById(taskId: string): Promise<TaskRecord | null> {
       return getTaskByIdFromClient(pool, taskId);
     },
     async listTasks(filters?: TaskQueryFilters): Promise<TaskRecord[]> {
       const clauses: string[] = [];
       const values: unknown[] = [];
+      const projectId = filters?.projectId ? await resolveProjectIdFromClient(pool, filters.projectId) : null;
 
       if (filters?.projectId) {
-        values.push(filters.projectId);
+        if (!projectId) {
+          return [];
+        }
+
+        values.push(projectId);
         clauses.push(`t.project_id = $${values.length}`);
       }
 
@@ -425,7 +447,10 @@ export function createPostgresTaskDatabase({
       });
     },
     async requeueExpiredTasks(projectId?: string): Promise<number> {
-      return withTransaction(pool, async (client) => requeueExpiredTasksInTransaction(client, projectId));
+      return withTransaction(pool, async (client) => {
+        const resolvedProjectId = projectId ? (await resolveProjectIdFromClient(client, projectId)) ?? undefined : undefined;
+        return requeueExpiredTasksInTransaction(client, resolvedProjectId);
+      });
     },
     async listTaskEvents(taskId: string): Promise<TaskEvent[]> {
       const result = await pool.query<TaskEventRow>(
@@ -444,6 +469,42 @@ export function createPostgresTaskDatabase({
           ORDER BY created_at ASC
         `,
         [taskId]
+      );
+
+      return result.rows.map((row) => ({
+        id: row.id,
+        taskId: row.task_id,
+        projectId: row.project_id,
+        eventType: row.event_type,
+        actorType: row.actor_type,
+        actorId: row.actor_id,
+        payload: row.payload_json ?? {},
+        createdAt: row.created_at.toISOString()
+      }));
+    },
+    async listProjectTaskEvents(projectId: string, limit = 20): Promise<TaskEvent[]> {
+      const resolvedProjectId = await resolveProjectIdFromClient(pool, projectId);
+      if (!resolvedProjectId) {
+        return [];
+      }
+
+      const result = await pool.query<TaskEventRow>(
+        `
+          SELECT
+            id,
+            task_id,
+            project_id,
+            event_type,
+            actor_type,
+            actor_id,
+            payload_json,
+            created_at
+          FROM task_events
+          WHERE project_id = $1
+          ORDER BY created_at DESC
+          LIMIT $2
+        `,
+        [resolvedProjectId, limit]
       );
 
       return result.rows.map((row) => ({
@@ -493,6 +554,42 @@ async function getTaskByIdFromClient(
 
   const row = result.rows[0];
   return row ? mapTaskRow(row) : null;
+}
+
+async function resolveProjectIdFromClient(
+  client: Pool | PoolClient,
+  projectRef: string
+): Promise<string | null> {
+  const project = await getProjectByIdOrKeyFromClient(client, projectRef);
+  return project?.id ?? null;
+}
+
+async function getProjectByIdOrKeyFromClient(
+  client: Pool | PoolClient,
+  projectRef: string
+): Promise<ProjectRecord | null> {
+  const result = await client.query<ProjectRow>(
+    `
+      SELECT id, key, name, created_at, updated_at
+      FROM projects
+      WHERE id = $1 OR key = $1
+      LIMIT 1
+    `,
+    [projectRef]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    key: row.key,
+    name: row.name,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString()
+  };
 }
 
 function mapTaskRow(row: TaskRow): TaskRecord {

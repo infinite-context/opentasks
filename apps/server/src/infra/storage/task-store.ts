@@ -1,5 +1,6 @@
 import type {
   ClaimedTask,
+  ProjectRecord,
   TaskEvent,
   TaskRecord
 } from "../../shared/types";
@@ -17,6 +18,7 @@ export interface TaskStore {
     agentName: string,
     options: TaskClaimOptions
   ): Promise<ClaimedTask | null>;
+  getProject(projectId: string): Promise<ProjectRecord | null>;
   getTaskById(taskId: string): Promise<TaskRecord | null>;
   listTasks(filters?: TaskQueryFilters): Promise<TaskRecord[]>;
   markTaskInProgress(taskId: string, agentName: string): Promise<TaskRecord | null>;
@@ -30,4 +32,5 @@ export interface TaskStore {
   ): Promise<TaskRecord | null>;
   requeueExpiredTasks(projectId?: string): Promise<number>;
   listTaskEvents(taskId: string): Promise<TaskEvent[]>;
+  listProjectTaskEvents(projectId: string, limit?: number): Promise<TaskEvent[]>;
 }

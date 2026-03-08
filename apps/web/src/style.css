@@ -205,8 +205,10 @@ button {
 }
 
 .sidebar__theme-toggle {
-  width: 100%;
-  justify-content: flex-start;
+  width: 3rem;
+  min-width: 3rem;
+  padding-inline: 0;
+  justify-content: center;
 }
 
 .sidebar__panel h3 {
@@ -275,6 +277,12 @@ button {
   color: var(--text);
 }
 
+.search input:disabled {
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 1;
+}
+
 .search__icon {
   display: inline-flex;
   align-items: center;
@@ -297,6 +305,15 @@ button {
 
 .button:hover {
   transform: translateY(-1px);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.button:disabled:hover {
+  transform: none;
 }
 
 .button__content {
@@ -389,7 +406,7 @@ button {
 
 .pipeline {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 0.75rem;
 }
 
@@ -450,6 +467,20 @@ button {
 .status-pill--available {
   background: rgba(37, 99, 235, 0.14);
   color: var(--info);
+}
+
+.pipeline__bar--pending,
+.status-pill--pending,
+.pipeline__bar--cancelled,
+.status-pill--cancelled {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-muted);
+}
+
+.pipeline__bar--failed,
+.status-pill--failed {
+  background: rgba(239, 68, 68, 0.16);
+  color: var(--danger);
 }
 
 .pipeline__meta {

@@ -2,12 +2,19 @@
   "name": "opentasks",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
-    "dev": "npm --workspace=@opentasks/server --silent run dev",
+    "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server:web\" \"npm:dev:web\"",
+    "dev:server": "npm --workspace=@opentasks/server --silent run dev",
+    "dev:server:web": "cross-env OPENTASKS_MCP_ENABLED=false npm --workspace=@opentasks/server --silent run dev",
     "dev:web": "npm --workspace=@opentasks/web --silent run dev",
     "build:web": "npm --workspace=@opentasks/web --silent run build",
-    "typecheck": "npm --workspace=@opentasks/server --silent run typecheck && npm --workspace=@opentasks/web --silent run typecheck"
+    "typecheck": "npm --workspace=@opentasks/contracts --silent run typecheck && npm --workspace=@opentasks/server --silent run typecheck && npm --workspace=@opentasks/web --silent run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0"
   }
 }

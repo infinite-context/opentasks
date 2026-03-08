@@ -1,6 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import {
+  taskActionSchema as sharedTaskActionSchema,
+  taskCompletionSchema,
+  taskFailureSchema,
+  taskReleaseSchema,
+  taskRequestSchema
+} from "@opentasks/contracts/schemas";
 import type { Logger } from "../../infra/logging";
 import type { ExecutionLoop } from "../../system/execution-loop";
 import type { TaskRuntimeService } from "../../system/task-runtime-service";
@@ -14,18 +21,8 @@ interface CreateMcpTransportParams {
   taskRuntimeService: TaskRuntimeService;
 }
 
-const requestTaskSchema = {
-  agentName: z.string().min(1),
-  projectId: z.string().min(1),
-  taskHint: z.string().optional(),
-  capabilities: z.array(z.string()).optional(),
-  leaseDurationSeconds: z.number().int().positive().optional()
-};
-
-const taskActionSchema = {
-  taskId: z.string().min(1),
-  agentName: z.string().min(1)
-};
+const requestTaskSchema = taskRequestSchema.shape;
+const taskActionSchema = sharedTaskActionSchema.shape;
 
 export function createMcpTransport({
   logger,
@@ -126,8 +123,7 @@ export function createMcpTransport({
       description: "Mark a claimed task as completed.",
       inputSchema: {
         ...taskActionSchema,
-        summary: z.string().min(1),
-        metadata: z.record(z.string(), z.unknown()).optional()
+        ...taskCompletionSchema.shape
       }
     },
     async (args) => taskMutationResult(
@@ -147,8 +143,7 @@ export function createMcpTransport({
       description: "Mark a claimed task as failed.",
       inputSchema: {
         ...taskActionSchema,
-        error: z.string().min(1),
-        metadata: z.record(z.string(), z.unknown()).optional()
+        ...taskFailureSchema.shape
       }
     },
     async (args) => taskMutationResult(
@@ -168,8 +163,7 @@ export function createMcpTransport({
       description: "Release a claimed task back to the queue.",
       inputSchema: {
         ...taskActionSchema,
-        reason: z.string().min(1),
-        metadata: z.record(z.string(), z.unknown()).optional()
+        ...taskReleaseSchema.shape
       }
     },
     async (args) => taskMutationResult(
