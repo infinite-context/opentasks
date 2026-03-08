@@ -8,6 +8,7 @@ export type ViewId =
   | "dashboard"
   | "tasks"
   | "agents"
+  | "analytics"
   | "system-health"
   | "mcp"
   | "runs"
@@ -21,3 +22,5 @@ export interface NavItem {
 }
 
 export type MetricTrend = "up" | "down" | "neutral";
+
+export type AnalyticsTimeRange = "day" | "week" | "month" | "year";

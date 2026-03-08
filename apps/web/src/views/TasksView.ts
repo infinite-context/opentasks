@@ -1,16 +1,15 @@
-import type { TaskRecord } from "@opentasks/contracts";
+import type { TaskEvent, TaskRecord } from "@opentasks/contracts";
 import type { TaskFilter } from "../types";
 import {
   renderTaskDetailCard,
   renderTaskListSection
 } from "../components";
-import type { TaskDetailDto } from "@opentasks/contracts";
 
 export interface TasksViewProps {
   tasks: TaskRecord[];
   activeFilter: TaskFilter;
   selectedTaskId: string;
-  selectedTaskDetail: TaskDetailDto | null;
+  taskDetailEvents: TaskEvent[] | null;
   errorMessage: string;
   isLoading: boolean;
 }
@@ -20,16 +19,12 @@ export function renderTasksView(props: TasksViewProps): string {
     tasks,
     activeFilter,
     selectedTaskId,
-    selectedTaskDetail,
+    taskDetailEvents,
     errorMessage,
     isLoading
   } = props;
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
-  const selectedEvents =
-    selectedTaskDetail && selectedTask && selectedTaskDetail.task?.id === selectedTask.id
-      ? selectedTaskDetail.events
-      : [];
 
   return `
     <section class="content-grid">
@@ -38,7 +33,7 @@ export function renderTasksView(props: TasksViewProps): string {
       </div>
 
       <div class="stack">
-        ${renderTaskDetailCard(selectedTask, selectedEvents)}
+        ${renderTaskDetailCard(selectedTask, taskDetailEvents ?? undefined)}
       </div>
     </section>
   `;

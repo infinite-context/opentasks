@@ -20,7 +20,8 @@ export function renderSidebar(
         ${renderNavSection("Overview", [
           { id: "dashboard", label: "Dashboard", icon: "fa-solid fa-table-columns" },
           { id: "tasks", label: "Tasks", icon: "fa-solid fa-list-check" },
-          { id: "agents", label: "Agents", icon: "fa-solid fa-robot" },
+          { id: "agents", label: "Agents", icon: "fa-solid fa-wrench" },
+          { id: "analytics", label: "Analytics", icon: "fa-solid fa-chart-line" },
           { id: "runs", label: "Runs", icon: "fa-solid fa-play-circle" }
         ], currentView)}
         ${renderNavSection("Intelligence", [

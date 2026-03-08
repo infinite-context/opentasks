@@ -5,7 +5,6 @@ import {
   taskDetailDtoSchema,
   taskListDtoSchema,
   type DashboardSnapshotDto,
-  type TaskDetailDto,
   type TaskRecord
 } from "@opentasks/contracts";
 import "./style.css";
@@ -13,14 +12,17 @@ import "./style.css";
 import { renderSidebar, renderTopbar } from "./components";
 import { DEFAULT_PROJECT_ID } from "./config";
 import {
+  buildAnalyticsChartData,
   buildDashboardApiUrl,
   buildDashboardStreamUrl,
   buildFocusMessage,
   buildMetaUrl,
   buildTaskDetailUrl,
   buildTaskListUrl,
+  destroyAnalyticsCharts,
   filterTasks,
   getAppRoot,
+  initAnalyticsCharts,
   pickSelectedTaskId,
   taskFilterToStatusParams,
   resolveInitialTheme,
@@ -28,23 +30,27 @@ import {
 } from "./lib";
 import {
   renderAgentsView,
+  renderAnalyticsView,
   renderDashboardView,
   renderMcpView,
   renderPlaceholderView,
+  renderSettingsView,
   renderSystemHealthView,
   renderTasksView
 } from "./views";
-import type { ConnectionState, TaskFilter, ViewId } from "./types";
+import type { AnalyticsTimeRange, ConnectionState, TaskFilter, ViewId } from "./types";
 
 const appRoot = getAppRoot();
 
 let activeTheme = resolveInitialTheme();
+let analyticsTimeRange: AnalyticsTimeRange = "day";
 let currentView: ViewId = "dashboard";
 let selectedTaskId = "";
 let activeTaskFilter: TaskFilter = "all";
 let dashboardSnapshot: DashboardSnapshotDto | null = null;
 let taskList: TaskRecord[] = [];
-let selectedTaskDetail: TaskDetailDto | null = null;
+let taskDetailEvents: import("@opentasks/contracts").TaskEvent[] | null = null;
+let selectedAgentName = "";
 let connectionState: ConnectionState = "connecting";
 let errorMessage = "";
 let tasksViewErrorMessage = "";
@@ -83,7 +89,6 @@ async function loadDashboardSnapshot(): Promise<void> {
     const snapshot = dashboardSnapshotDtoSchema.parse(await response.json());
     dashboardSnapshot = snapshot;
     selectedTaskId = pickSelectedTaskId(snapshot.tasks, selectedTaskId);
-    await loadSelectedTaskDetail();
     connectionState = "connected";
   } catch (error) {
     errorMessage = error instanceof Error ? error.message : "Unable to load dashboard data.";
@@ -114,32 +119,34 @@ async function loadTaskList(): Promise<void> {
     const dto = taskListDtoSchema.parse(await response.json());
     taskList = dto.tasks;
     selectedTaskId = pickSelectedTaskId(dto.tasks, selectedTaskId);
-    await loadSelectedTaskDetail();
   } catch (error) {
     tasksViewErrorMessage = error instanceof Error ? error.message : "Unable to load tasks.";
     taskList = [];
   } finally {
     tasksViewLoading = false;
     renderApp();
+    if (currentView === "tasks") {
+      await loadTaskDetail(selectedTaskId);
+      renderApp();
+    }
   }
 }
 
-async function loadSelectedTaskDetail(): Promise<void> {
-  if (!selectedTaskId) {
-    selectedTaskDetail = null;
+async function loadTaskDetail(taskId: string): Promise<void> {
+  if (!taskId) {
+    taskDetailEvents = null;
     return;
   }
-
   try {
-    const response = await fetch(buildTaskDetailUrl(selectedTaskId));
+    const response = await fetch(buildTaskDetailUrl(taskId));
     if (!response.ok) {
-      selectedTaskDetail = null;
+      taskDetailEvents = [];
       return;
     }
-
-    selectedTaskDetail = taskDetailDtoSchema.parse(await response.json());
+    const dto = taskDetailDtoSchema.parse(await response.json());
+    taskDetailEvents = dto.events ?? [];
   } catch {
-    selectedTaskDetail = null;
+    taskDetailEvents = [];
   }
 }
 
@@ -158,7 +165,6 @@ function connectDashboardStream(): void {
       selectedTaskId = pickSelectedTaskId(parsed.data.tasks, selectedTaskId);
       connectionState = "connected";
       renderApp();
-      void loadSelectedTaskDetail().then(renderApp);
     } catch {
       connectionState = "disconnected";
       renderApp();
@@ -206,6 +212,18 @@ async function loadDataForCurrentView(): Promise<void> {
       await loadTaskList();
       break;
     case "agents":
+      if (!dashboardSnapshot) {
+        await loadDashboardSnapshot();
+      }
+      if (!selectedAgentName && (dashboardSnapshot?.agents?.length ?? 0) > 0) {
+        selectedAgentName = dashboardSnapshot!.agents[0].agentName;
+      }
+      break;
+    case "analytics":
+      if (!dashboardSnapshot) {
+        await loadDashboardSnapshot();
+      }
+      break;
     case "system-health":
       if (!dashboardSnapshot) {
         await loadDashboardSnapshot();
@@ -238,7 +256,6 @@ function renderMainContent(): string {
         filteredTasks,
         activeTaskFilter,
         selectedTask,
-        selectedTaskDetail,
         connectionState,
         errorMessage,
         isLoading
@@ -250,13 +267,18 @@ function renderMainContent(): string {
         tasks: taskList,
         activeFilter: activeTaskFilter,
         selectedTaskId: selectedTask?.id ?? selectedTaskId,
-        selectedTaskDetail,
+        taskDetailEvents,
         errorMessage: tasksViewErrorMessage,
         isLoading: tasksViewLoading
       });
     }
     case "agents":
-      return renderAgentsView(dashboardSnapshot);
+      return renderAgentsView({
+        snapshot: dashboardSnapshot,
+        selectedAgentName
+      });
+    case "analytics":
+      return renderAnalyticsView({ snapshot: dashboardSnapshot, analyticsTimeRange });
     case "system-health":
       return renderSystemHealthView(dashboardSnapshot);
     case "mcp": {
@@ -278,8 +300,9 @@ function renderMainContent(): string {
     }
     case "runs":
     case "memory":
-    case "settings":
       return renderPlaceholderView(getPlaceholderTitle(currentView));
+    case "settings":
+      return renderSettingsView({ activeTheme });
     default:
       return renderPlaceholderView("Feature");
   }
@@ -304,12 +327,15 @@ function getTopbarProps(): { title: string; subtitle: string } {
       return { title: "Agents", subtitle: "Agent utilization" };
     case "system-health":
       return { title: "System Health", subtitle: "Platform status" };
+    case "analytics":
+      return { title: "Analytics", subtitle: "Task metrics" };
     case "mcp":
       return { title: "MCP", subtitle: "Server setup" };
     case "runs":
     case "memory":
-    case "settings":
       return { title: getPlaceholderTitle(currentView), subtitle: "Coming soon" };
+    case "settings":
+      return { title: "Settings", subtitle: "Preferences" };
     default:
       return { title: "OpenTasks", subtitle: "" };
   }
@@ -317,6 +343,11 @@ function getTopbarProps(): { title: string; subtitle: string } {
 
 function renderApp(): void {
   const snapshot = dashboardSnapshot;
+
+  destroyAnalyticsCharts();
+
+  const mainEl = appRoot.querySelector<HTMLElement>(".main");
+  const scrollTop = mainEl?.scrollTop ?? 0;
 
   document.documentElement.dataset.theme = activeTheme;
   appRoot.innerHTML = `
@@ -330,7 +361,19 @@ function renderApp(): void {
     </div>
   `;
 
+  const newMain = appRoot.querySelector<HTMLElement>(".main");
+  if (newMain && scrollTop > 0) {
+    newMain.scrollTop = scrollTop;
+  }
+
   bindEvents();
+
+  if (currentView === "analytics") {
+    const chartData = buildAnalyticsChartData(dashboardSnapshot, analyticsTimeRange);
+    requestAnimationFrame(() => {
+      initAnalyticsCharts(chartData);
+    });
+  }
 }
 
 function bindEvents(): void {
@@ -339,6 +382,22 @@ function bindEvents(): void {
     activeTheme = activeTheme === "light" ? "dark" : "light";
     persistTheme(activeTheme);
     renderApp();
+  });
+
+  document.querySelector<HTMLSelectElement>("[data-analytics-time-range]")?.addEventListener("change", (e) => {
+    analyticsTimeRange = (e.target as HTMLSelectElement).value as AnalyticsTimeRange;
+    renderApp();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const choice = btn.dataset.themeChoice as "light" | "dark" | undefined;
+      if (choice === "light" || choice === "dark") {
+        activeTheme = choice;
+        persistTheme(activeTheme);
+        renderApp();
+      }
+    });
   });
 
   document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => {
@@ -358,11 +417,73 @@ function bindEvents(): void {
     });
   });
 
-  document.querySelectorAll<HTMLButtonElement>("[data-task-id]").forEach((button) => {
-    button.addEventListener("click", () => {
-      selectedTaskId = button.dataset.taskId ?? selectedTaskId;
+  document.querySelectorAll<HTMLElement>("[data-task-id]").forEach((row) => {
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("[data-agent-link]")) {
+        return;
+      }
+      selectedTaskId = row.dataset.taskId ?? selectedTaskId;
+      if (currentView === "tasks") {
+        void loadTaskDetail(selectedTaskId).then(renderApp);
+      } else {
+        renderApp();
+      }
+    });
+    row.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        if ((e.target as HTMLElement).closest("[data-agent-link]")) {
+          return;
+        }
+        selectedTaskId = row.dataset.taskId ?? selectedTaskId;
+        if (currentView === "tasks") {
+          void loadTaskDetail(selectedTaskId).then(renderApp);
+        } else {
+          renderApp();
+        }
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLElement>("[data-agent-link]").forEach((el) => {
+    if (!el.dataset.agentName) return;
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      selectedAgentName = el.dataset.agentName ?? "";
+      currentView = "agents";
+      if (dashboardStream) {
+        dashboardStream.close();
+        dashboardStream = null;
+      }
+      void loadDataForCurrentView().then(renderApp);
+    });
+    el.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") && el.dataset.agentName) {
+        e.preventDefault();
+        e.stopPropagation();
+        selectedAgentName = el.dataset.agentName ?? "";
+        currentView = "agents";
+        if (dashboardStream) {
+          dashboardStream.close();
+          dashboardStream = null;
+        }
+        void loadDataForCurrentView().then(renderApp);
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLElement>(".agent-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      selectedAgentName = row.dataset.agentName ?? selectedAgentName;
       renderApp();
-      void loadSelectedTaskDetail().then(renderApp);
+    });
+    row.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectedAgentName = row.dataset.agentName ?? selectedAgentName;
+        renderApp();
+      }
     });
   });
 

@@ -22,7 +22,7 @@ function renderAgentLoad(agent: DashboardSnapshotDto["agents"][number]): string 
   return `
     <div class="mini-table__row">
       <div>
-        <div class="mini-table__title">${escapeHtml(agent.agentName)}</div>
+        <div class="mini-table__title"><span class="agent-link" data-agent-link data-agent-name="${escapeHtml(agent.agentName)}" role="button" tabindex="0">${escapeHtml(agent.agentName)}</span></div>
         <div class="mini-table__subtitle">
           ${escapeHtml(`${agent.assignedTasks} assigned | ${agent.inProgressTasks} active | ${agent.completedTasks} completed`)}
         </div>

@@ -9,7 +9,7 @@ import {
   renderTaskDetailCard,
   renderTaskListSection
 } from "../components";
-import type { TaskDetailDto, TaskRecord } from "@opentasks/contracts";
+import type { TaskRecord } from "@opentasks/contracts";
 import type { TaskFilter } from "../types";
 
 export interface DashboardViewProps {
@@ -17,7 +17,6 @@ export interface DashboardViewProps {
   filteredTasks: TaskRecord[];
   activeTaskFilter: TaskFilter;
   selectedTask: TaskRecord | null;
-  selectedTaskDetail: TaskDetailDto | null;
   connectionState: ConnectionState;
   errorMessage: string;
   isLoading: boolean;
@@ -29,16 +28,10 @@ export function renderDashboardView(props: DashboardViewProps): string {
     filteredTasks,
     activeTaskFilter,
     selectedTask,
-    selectedTaskDetail,
     connectionState,
     errorMessage,
     isLoading
   } = props;
-
-  const selectedEvents =
-    selectedTaskDetail && selectedTask && selectedTaskDetail.task?.id === selectedTask.id
-      ? selectedTaskDetail.events
-      : [];
 
   return `
     <section class="metric-grid">
@@ -52,7 +45,7 @@ export function renderDashboardView(props: DashboardViewProps): string {
       </div>
 
       <div class="stack">
-        ${renderTaskDetailCard(selectedTask, selectedEvents)}
+        ${renderTaskDetailCard(selectedTask)}
         ${renderActivityCard(snapshot?.activity ?? [])}
         ${renderAgentUtilizationCard(snapshot?.agents ?? [])}
         ${renderHealthCard(snapshot?.health ?? [])}

@@ -4,12 +4,26 @@ export function formatStatus(status: TaskStatus): string {
   return status.replaceAll("_", " ");
 }
 
+/** Normalize SQLite "YYYY-MM-DD HH:MM:SS" (UTC) to ISO format for reliable parsing. */
+export function parseTimestamp(timestamp: string): Date {
+  const normalized = timestamp.includes(" ") && !timestamp.includes("T")
+    ? timestamp.replace(" ", "T") + (timestamp.length === 19 ? "Z" : "")
+    : timestamp;
+  return new Date(normalized);
+}
+
 export function formatRelativeTime(timestamp: string | null): string {
   if (!timestamp) {
     return "Unknown";
   }
 
-  const diffMs = Date.now() - new Date(timestamp).getTime();
+  const date = parseTimestamp(timestamp);
+  const timeMs = date.getTime();
+  if (!Number.isFinite(timeMs)) {
+    return "Unknown";
+  }
+
+  const diffMs = Date.now() - timeMs;
   const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
 
   if (diffMinutes < 1) {
@@ -27,6 +41,42 @@ export function formatRelativeTime(timestamp: string | null): string {
 
   const diffDays = Math.round(diffHours / 24);
   return `${diffDays}d ago`;
+}
+
+export function formatDateTime(timestamp: string | null): string {
+  if (!timestamp) {
+    return "Unknown";
+  }
+
+  const date = parseTimestamp(timestamp);
+  const timeMs = date.getTime();
+  if (!Number.isFinite(timeMs)) {
+    return "Unknown";
+  }
+
+  const now = new Date();
+  const isToday =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+
+  const timeStr = date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+
+  if (isToday) {
+    return timeStr;
+  }
+
+  const dateStr = date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined
+  });
+
+  return `${dateStr}, ${timeStr}`;
 }
 
 export function formatTaskEvent(event: TaskEvent): string {
