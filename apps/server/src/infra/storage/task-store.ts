@@ -1,26 +1,43 @@
 import type {
   ClaimedTask,
+  GoalRecord,
   ProjectRecord,
   TaskEvent,
   TaskRecord
 } from "@opentasks/contracts";
 import type {
+  CreateGoalInput,
+  CreateProjectInput,
   CreateTaskInput,
   TaskClaimOptions,
   TaskCompletion,
   TaskFailure,
   TaskQueryFilters,
-  TaskRelease
+  TaskRelease,
+  UpdateGoalInput
 } from "@opentasks/contracts";
+
+export interface ProjectStore {
+  createProject(input: CreateProjectInput): Promise<ProjectRecord>;
+  getProject(projectId: string): Promise<ProjectRecord | null>;
+  listProjects(limit?: number): Promise<ProjectRecord[]>;
+}
+
+export interface GoalStore {
+  createGoal(input: CreateGoalInput): Promise<GoalRecord | null>;
+  updateGoal(input: UpdateGoalInput): Promise<GoalRecord | null>;
+  getGoal(goalId: string): Promise<GoalRecord | null>;
+  listGoals(projectId: string): Promise<GoalRecord[]>;
+}
 
 export interface TaskStore {
   createTask(input: CreateTaskInput): Promise<TaskRecord | null>;
   claimNextTask(
     projectId: string,
+    goalId: string,
     agentName: string,
     options: TaskClaimOptions
   ): Promise<ClaimedTask | null>;
-  getProject(projectId: string): Promise<ProjectRecord | null>;
   getTaskById(taskId: string): Promise<TaskRecord | null>;
   listTasks(filters?: TaskQueryFilters): Promise<TaskRecord[]>;
   markTaskInProgress(taskId: string, agentName: string): Promise<TaskRecord | null>;
@@ -32,7 +49,9 @@ export interface TaskStore {
     agentName: string,
     leaseDurationSeconds: number
   ): Promise<TaskRecord | null>;
-  requeueExpiredTasks(projectId?: string): Promise<number>;
+  requeueExpiredTasks(projectId?: string, goalId?: string): Promise<number>;
   listTaskEvents(taskId: string): Promise<TaskEvent[]>;
   listProjectTaskEvents(projectId: string, limit?: number): Promise<TaskEvent[]>;
 }
+
+export type CoordinationStore = ProjectStore & GoalStore & TaskStore;

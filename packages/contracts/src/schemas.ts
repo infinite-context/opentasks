@@ -15,6 +15,7 @@ export const taskStatusSchema = z.enum([
 
 export const taskPrioritySchema = z.enum(["P0", "P1", "P2", "P3"]);
 export const taskSourceSchema = z.enum(["seeded", "manual", "system"]);
+export const goalStatusSchema = z.enum(["active", "paused", "completed", "cancelled"]);
 export const taskEventTypeSchema = z.enum([
   "task_created",
   "task_available",
@@ -38,9 +39,23 @@ export const projectRecordSchema = z.object({
   updatedAt: z.string().min(1)
 });
 
+export const goalRecordSchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  key: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string(),
+  status: goalStatusSchema,
+  priority: taskPrioritySchema,
+  metadata: metadataSchema,
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1)
+});
+
 export const taskRecordSchema = z.object({
   id: z.string().min(1),
   projectId: z.string().min(1),
+  goalId: z.string().min(1),
   title: z.string().min(1),
   description: z.string(),
   status: taskStatusSchema,
@@ -88,10 +103,43 @@ export const memoryArtifactSchema = z.object({
 
 export const createTaskInputSchema = z.object({
   projectId: z.string().min(1),
+  goalId: z.string().min(1),
   title: z.string().min(1),
   description: z.string().optional(),
   priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
   dependencyIds: z.array(z.string().min(1)).optional()
+});
+
+export const createProjectInputSchema = z.object({
+  key: z.string().min(1),
+  name: z.string().min(1)
+});
+
+export const projectListQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().optional()
+});
+
+export const createGoalInputSchema = z.object({
+  projectId: z.string().min(1),
+  key: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  priority: taskPrioritySchema.optional(),
+  metadata: metadataSchema.optional()
+});
+
+export const updateGoalInputSchema = z.object({
+  goalId: z.string().min(1),
+  projectId: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  status: goalStatusSchema.optional(),
+  priority: taskPrioritySchema.optional(),
+  metadata: metadataSchema.optional()
+});
+
+export const goalListQuerySchema = z.object({
+  projectId: z.string().min(1)
 });
 
 export const taskRequestSchema = z.object({
@@ -110,6 +158,7 @@ export const taskClaimOptionsSchema = z.object({
 
 export const taskQueryFiltersSchema = z.object({
   projectId: z.string().min(1).optional(),
+  goalId: z.string().min(1).optional(),
   status: z.array(taskStatusSchema).optional(),
   assignedTo: z.string().min(1).optional(),
   limit: z.number().int().positive().optional()
@@ -121,6 +170,7 @@ export const dashboardQuerySchema = z.object({
 
 export const taskListQuerySchema = z.object({
   projectId: z.string().min(1).optional(),
+  goalId: z.string().min(1).optional(),
   status: z.array(taskStatusSchema).optional(),
   assignedTo: z.string().min(1).optional(),
   limit: z.coerce.number().int().positive().optional()
@@ -175,6 +225,14 @@ export const modelResponseSchema = z.object({
 export const taskDetailDtoSchema = z.object({
   task: z.union([taskRecordSchema, claimedTaskSchema]).nullable(),
   events: z.array(taskEventSchema)
+});
+
+export const projectListDtoSchema = z.object({
+  projects: z.array(projectRecordSchema)
+});
+
+export const goalListDtoSchema = z.object({
+  goals: z.array(goalRecordSchema)
 });
 
 export const taskListDtoSchema = z.object({
@@ -241,4 +299,33 @@ export const dashboardSnapshotDtoSchema = z.object({
 export const dashboardStreamEventDtoSchema = z.object({
   type: z.literal("dashboard.snapshot"),
   data: dashboardSnapshotDtoSchema
+});
+
+export const operationStatusSchema = z.enum([
+  "ok",
+  "missing_project",
+  "missing_goals",
+  "project_not_found",
+  "goal_not_found",
+  "task_not_found",
+  "goal_project_mismatch",
+  "task_goal_mismatch",
+  "no_task_available",
+  "invalid_transition"
+]);
+
+export const operationContextDtoSchema = z.object({
+  project: projectRecordSchema.nullable().optional(),
+  projects: z.array(projectRecordSchema).optional(),
+  goal: goalRecordSchema.nullable().optional(),
+  goals: z.array(goalRecordSchema).optional(),
+  task: z.union([taskRecordSchema, claimedTaskSchema]).nullable().optional(),
+  events: z.array(taskEventSchema).optional()
+});
+
+export const operationResultDtoSchema = z.object({
+  status: operationStatusSchema,
+  message: z.string().min(1),
+  guidance: z.array(z.string().min(1)),
+  context: operationContextDtoSchema.optional()
 });

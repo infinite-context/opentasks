@@ -9,8 +9,14 @@ import { createInMemoryTaskStore } from "./infra/storage/in-memory-task-store";
 import { createSqliteTaskDatabase } from "./infra/storage/sqlite-task-database";
 import { applySqliteSchema, seedSqliteDemoData } from "./infra/storage/sqlite-schema";
 import { createDashboardQueryService } from "./system/dashboard-query-service";
+import { createExecutionLoop } from "./system/execution-loop";
+import { createGoalService } from "./system/goal-service";
+import { createProjectService } from "./system/project-service";
+import { createTaskListManager } from "./system/task-list-manager";
+import { createTaskOrchestrator } from "./system/task-orchestrator";
 import { createTaskService } from "./system/task-service";
 import { createTaskQueryService } from "./system/task-query-service";
+import { createValidationService } from "./system/validation-service";
 import { createHttpTransport } from "./transport/http";
 import { createMcpTransport } from "./transport/mcp";
 
@@ -49,10 +55,40 @@ export function createApp(overrides?: Partial<AppEnv>): App {
       ? createSqliteTaskDatabase({ logger, db })
       : createInMemoryTaskStore({ logger });
 
+  const validationService = createValidationService({
+    logger,
+    store: taskStore
+  });
+  const projectService = createProjectService({
+    logger,
+    projectStore: taskStore
+  });
+  const goalService = createGoalService({
+    logger,
+    goalStore: taskStore,
+    taskStore,
+    validationService
+  });
   const taskService = createTaskService({
     logger,
     taskStore,
+    validationService,
     defaultLeaseDurationSeconds: env.defaultLeaseDurationSeconds
+  });
+  const taskListManager = createTaskListManager({
+    logger,
+    taskStore
+  });
+  const taskOrchestrator = createTaskOrchestrator({
+    logger,
+    validationService,
+    goalService,
+    taskListManager,
+    defaultLeaseDurationSeconds: env.defaultLeaseDurationSeconds
+  });
+  const executionLoop = createExecutionLoop({
+    logger,
+    taskOrchestrator
   });
 
   const taskQueryService = createTaskQueryService({
@@ -68,7 +104,10 @@ export function createApp(overrides?: Partial<AppEnv>): App {
         logger,
         appName: env.appName,
         appVersion: env.appVersion,
-        taskService
+        projectService,
+        goalService,
+        taskService,
+        executionLoop
       })
     : null;
   const projectPath = process.env.OPENTASKS_PROJECT_PATH ?? getCwd();
@@ -79,6 +118,7 @@ export function createApp(overrides?: Partial<AppEnv>): App {
         appVersion: env.appVersion,
         projectPath,
         port: env.httpPort,
+        projectService,
         dashboardQueryService,
         taskQueryService
       })

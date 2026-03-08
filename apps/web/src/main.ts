@@ -1,10 +1,13 @@
 import "@fortawesome/fontawesome-free/css/all.min.css";
 import {
+  projectListDtoSchema,
+  projectRecordSchema,
   dashboardSnapshotDtoSchema,
   dashboardStreamEventDtoSchema,
   taskDetailDtoSchema,
   taskListDtoSchema,
   type DashboardSnapshotDto,
+  type ProjectRecord,
   type TaskRecord
 } from "@opentasks/contracts";
 import "./style.css";
@@ -13,16 +16,19 @@ import { renderSidebar, renderTopbar } from "./components";
 import { DEFAULT_PROJECT_ID } from "./config";
 import {
   buildAnalyticsChartData,
+  buildProjectListUrl,
   buildDashboardApiUrl,
   buildDashboardStreamUrl,
   buildFocusMessage,
   buildMetaUrl,
   buildTaskDetailUrl,
   buildTaskListUrl,
+  createProjectRequest,
   destroyAnalyticsCharts,
   filterTasks,
   getAppRoot,
   initAnalyticsCharts,
+  normalizeProjectKey,
   pickSelectedTaskId,
   taskFilterToStatusParams,
   resolveInitialTheme,
@@ -34,6 +40,7 @@ import {
   renderDashboardView,
   renderMcpView,
   renderPlaceholderView,
+  renderProjectsView,
   renderSettingsView,
   renderSystemHealthView,
   renderTasksView
@@ -45,6 +52,9 @@ const appRoot = getAppRoot();
 let activeTheme = resolveInitialTheme();
 let analyticsTimeRange: AnalyticsTimeRange = "day";
 let currentView: ViewId = "dashboard";
+let currentProjectId = DEFAULT_PROJECT_ID;
+let projects: ProjectRecord[] = [];
+let isProjectMenuOpen = false;
 let selectedTaskId = "";
 let activeTaskFilter: TaskFilter = "all";
 let dashboardSnapshot: DashboardSnapshotDto | null = null;
@@ -61,11 +71,16 @@ let mcpProjectPath: string | null = null;
 let mcpErrorMessage = "";
 let mcpLoading = false;
 let mcpConfigJson = "";
+let projectFormName = "";
+let projectFormKey = "";
+let projectFormError = "";
+let projectFormSubmitting = false;
 
 void initializeApp();
 
 async function initializeApp(): Promise<void> {
   renderApp();
+  await loadProjects();
   await loadDataForCurrentView();
   if (currentView === "dashboard") {
     connectDashboardStream();
@@ -75,19 +90,41 @@ async function initializeApp(): Promise<void> {
   });
 }
 
+async function loadProjects(): Promise<void> {
+  try {
+    const response = await fetch(buildProjectListUrl(100));
+    if (!response.ok) {
+      throw new Error(`Project list request failed with status ${response.status}.`);
+    }
+
+    const dto = projectListDtoSchema.parse(await response.json());
+    projects = dto.projects;
+
+    if (
+      projects.length > 0 &&
+      !projects.some((project) => project.id === currentProjectId || project.key === currentProjectId)
+    ) {
+      currentProjectId = projects[0].id;
+    }
+  } catch {
+    projects = [];
+  }
+}
+
 async function loadDashboardSnapshot(): Promise<void> {
   isLoading = true;
   errorMessage = "";
   renderApp();
 
   try {
-    const response = await fetch(buildDashboardApiUrl(DEFAULT_PROJECT_ID));
+    const response = await fetch(buildDashboardApiUrl(currentProjectId));
     if (!response.ok) {
       throw new Error(`Dashboard request failed with status ${response.status}.`);
     }
 
     const snapshot = dashboardSnapshotDtoSchema.parse(await response.json());
     dashboardSnapshot = snapshot;
+    currentProjectId = snapshot.project?.id ?? snapshot.project?.key ?? currentProjectId;
     selectedTaskId = pickSelectedTaskId(snapshot.tasks, selectedTaskId);
     connectionState = "connected";
   } catch (error) {
@@ -107,7 +144,7 @@ async function loadTaskList(): Promise<void> {
   try {
     const statusParams = taskFilterToStatusParams(activeTaskFilter);
     const url = buildTaskListUrl({
-      projectId: DEFAULT_PROJECT_ID,
+      projectId: currentProjectId,
       status: statusParams,
       limit: 100
     });
@@ -155,7 +192,7 @@ function connectDashboardStream(): void {
   connectionState = "connecting";
   renderApp();
 
-  const streamUrl = buildDashboardStreamUrl(DEFAULT_PROJECT_ID);
+  const streamUrl = buildDashboardStreamUrl(currentProjectId);
   dashboardStream = new EventSource(streamUrl);
 
   dashboardStream.addEventListener("dashboard.snapshot", (event) => {
@@ -232,6 +269,7 @@ async function loadDataForCurrentView(): Promise<void> {
     case "mcp":
       await loadMcpMeta();
       break;
+    case "projects":
     case "runs":
     case "memory":
     case "settings":
@@ -298,6 +336,13 @@ function renderMainContent(): string {
         errorMessage: mcpErrorMessage
       });
     }
+    case "projects":
+      return renderProjectsView({
+        keyValue: projectFormKey,
+        nameValue: projectFormName,
+        errorMessage: projectFormError,
+        isSubmitting: projectFormSubmitting
+      });
     case "runs":
     case "memory":
       return renderPlaceholderView(getPlaceholderTitle(currentView));
@@ -310,6 +355,7 @@ function renderMainContent(): string {
 
 function getPlaceholderTitle(view: ViewId): string {
   const titles: Record<string, string> = {
+    projects: "Projects",
     runs: "Runs",
     memory: "Memory",
     settings: "Settings"
@@ -319,6 +365,8 @@ function getPlaceholderTitle(view: ViewId): string {
 
 function getTopbarProps(): { title: string; subtitle: string } {
   switch (currentView) {
+    case "projects":
+      return { title: "Projects", subtitle: "Workspace setup" };
     case "dashboard":
       return { title: "Dashboard", subtitle: "Live dashboard" };
     case "tasks":
@@ -343,6 +391,18 @@ function getTopbarProps(): { title: string; subtitle: string } {
 
 function renderApp(): void {
   const snapshot = dashboardSnapshot;
+  const projectOptions =
+    projects.length > 0
+      ? projects.map((project) => ({
+          id: project.id,
+          label: project.name
+        }))
+      : [
+          {
+            id: currentProjectId,
+            label: snapshot?.project?.name ?? snapshot?.project?.key ?? currentProjectId
+          }
+        ];
 
   destroyAnalyticsCharts();
 
@@ -352,7 +412,14 @@ function renderApp(): void {
   document.documentElement.dataset.theme = activeTheme;
   appRoot.innerHTML = `
     <div class="shell">
-      ${renderSidebar(activeTheme, currentView, buildFocusMessage(snapshot))}
+      ${renderSidebar(
+        activeTheme,
+        currentView,
+        buildFocusMessage(snapshot),
+        projectOptions,
+        currentProjectId,
+        isProjectMenuOpen
+      )}
 
       <main class="main">
         ${renderTopbar(getTopbarProps())}
@@ -404,6 +471,7 @@ function bindEvents(): void {
     button.addEventListener("click", () => {
       const view = button.dataset.view as ViewId | undefined;
       if (!view) return;
+      isProjectMenuOpen = false;
       currentView = view;
 
       if (view === "dashboard" && !dashboardStream) {
@@ -415,6 +483,71 @@ function bindEvents(): void {
 
       void loadDataForCurrentView().then(renderApp);
     });
+  });
+
+  document.querySelector<HTMLButtonElement>("[data-project-menu-toggle]")?.addEventListener("click", () => {
+    isProjectMenuOpen = !isProjectMenuOpen;
+    renderApp();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-project-option]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextProjectId = button.dataset.projectOption;
+      if (!nextProjectId) {
+        return;
+      }
+
+      isProjectMenuOpen = false;
+
+      if (nextProjectId === currentProjectId) {
+        renderApp();
+        return;
+      }
+
+      currentProjectId = nextProjectId;
+      selectedTaskId = "";
+      selectedAgentName = "";
+      dashboardSnapshot = null;
+      taskList = [];
+      taskDetailEvents = null;
+
+      if (currentView === "dashboard") {
+        connectDashboardStream();
+      } else if (dashboardStream) {
+        dashboardStream.close();
+        dashboardStream = null;
+      }
+
+      void loadDataForCurrentView().then(renderApp);
+    });
+  });
+
+  document.querySelector<HTMLButtonElement>("[data-project-new]")?.addEventListener("click", () => {
+    isProjectMenuOpen = false;
+    currentView = "projects";
+    projectFormError = "";
+    if (dashboardStream) {
+      dashboardStream.close();
+      dashboardStream = null;
+    }
+    renderApp();
+  });
+
+  document.querySelector<HTMLInputElement>("[data-project-name-input]")?.addEventListener("input", (event) => {
+    projectFormName = (event.target as HTMLInputElement).value;
+    if (!projectFormKey.trim()) {
+      projectFormKey = normalizeProjectKey(projectFormName);
+      renderApp();
+    }
+  });
+
+  document.querySelector<HTMLInputElement>("[data-project-key-input]")?.addEventListener("input", (event) => {
+    projectFormKey = (event.target as HTMLInputElement).value;
+  });
+
+  document.querySelector<HTMLFormElement>("[data-project-create-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitProjectForm();
   });
 
   document.querySelectorAll<HTMLElement>("[data-task-id]").forEach((row) => {
@@ -516,4 +649,44 @@ function bindEvents(): void {
       }
     });
   });
+}
+
+async function submitProjectForm(): Promise<void> {
+  const name = projectFormName.trim();
+  const key = normalizeProjectKey(projectFormKey || projectFormName);
+
+  if (!name || !key) {
+    projectFormError = "Project name and key are required.";
+    renderApp();
+    return;
+  }
+
+  projectFormSubmitting = true;
+  projectFormError = "";
+  renderApp();
+
+  try {
+    const response = await createProjectRequest({ key, name });
+    if (!response.ok) {
+      throw new Error(`Project create request failed with status ${response.status}.`);
+    }
+
+    const project = projectRecordSchema.parse(await response.json());
+    projectFormSubmitting = false;
+    projectFormName = "";
+    projectFormKey = "";
+    currentProjectId = project.id;
+    currentView = "dashboard";
+    selectedAgentName = "";
+    dashboardSnapshot = null;
+    taskList = [];
+    taskDetailEvents = null;
+    await loadProjects();
+    await loadDashboardSnapshot();
+    connectDashboardStream();
+  } catch (error) {
+    projectFormSubmitting = false;
+    projectFormError = error instanceof Error ? error.message : "Unable to create project.";
+    renderApp();
+  }
 }

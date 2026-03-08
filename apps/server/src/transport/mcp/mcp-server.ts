@@ -2,14 +2,23 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
+  createGoalInputSchema,
+  createProjectInputSchema,
   createTaskInputSchema,
+  goalListQuerySchema,
+  projectListQuerySchema,
   taskActionSchema as sharedTaskActionSchema,
   taskCompletionSchema,
   taskFailureSchema,
   taskReleaseSchema,
-  taskRequestSchema
+  taskRequestSchema,
+  updateGoalInputSchema
 } from "@opentasks/contracts/schemas";
+import type { OperationResultDto } from "@opentasks/contracts";
 import type { Logger } from "../../infra/logging";
+import type { ExecutionLoop } from "../../system/execution-loop/execution-loop";
+import type { GoalService } from "../../system/goal-service";
+import type { ProjectService } from "../../system/project-service";
 import type { TaskService } from "../../system/task-service";
 import type { McpTransport } from "./types";
 
@@ -17,18 +26,29 @@ interface CreateMcpTransportParams {
   logger: Logger;
   appName: string;
   appVersion: string;
+  projectService: ProjectService;
+  goalService: GoalService;
   taskService: TaskService;
+  executionLoop: ExecutionLoop;
 }
 
-const requestTaskSchema = taskRequestSchema.shape;
+const requestTaskShape = taskRequestSchema.shape;
 const createTaskInputShape = createTaskInputSchema.shape;
-const taskActionSchema = sharedTaskActionSchema.shape;
+const createProjectInputShape = createProjectInputSchema.shape;
+const createGoalInputShape = createGoalInputSchema.shape;
+const updateGoalInputShape = updateGoalInputSchema.shape;
+const projectListQueryShape = projectListQuerySchema.shape;
+const goalListQueryShape = goalListQuerySchema.shape;
+const taskActionShape = sharedTaskActionSchema.shape;
 
 export function createMcpTransport({
   logger,
   appName,
   appVersion,
-  taskService
+  projectService,
+  goalService,
+  taskService,
+  executionLoop
 }: CreateMcpTransportParams): McpTransport {
   const server = new McpServer(
     {
@@ -37,86 +57,102 @@ export function createMcpTransport({
     },
     {
       instructions:
-        "OpenTasks coordinates project tasks for external agents. Use create_task to add new tasks, then the task lifecycle tools to request, start, heartbeat, complete, fail, release, and inspect tasks."
+        "OpenTasks coordinates project goals and tasks for external agents. Use create_project and create_goal to define work, use create_task to add tasks inside goals, and use request_task only to ask the orchestrator for the next task."
     }
   );
   let transport: StdioServerTransport | null = null;
 
   server.registerTool(
-    "create_task",
+    "create_project",
     {
-      title: "Create Task",
-      description: "Create a new task in a project. The task will be available for agents to claim.",
-      inputSchema: createTaskInputShape
+      title: "Create Project",
+      description: "Create a new project that can own goals and tasks.",
+      inputSchema: createProjectInputShape
+    },
+    async (args) => toToolResult(await projectService.createProject(args))
+  );
+
+  server.registerTool(
+    "get_project",
+    {
+      title: "Get Project",
+      description: "Load a project by id or key.",
+      inputSchema: {
+        projectId: z.string().min(1)
+      }
+    },
+    async (args) => toToolResult(await projectService.getProject(args.projectId))
+  );
+
+  server.registerTool(
+    "list_projects",
+    {
+      title: "List Projects",
+      description: "List known projects.",
+      inputSchema: projectListQueryShape
     },
     async (args) => {
-      const task = await taskService.createTask(args);
-
-      if (!task) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Could not create task in project "${args.projectId}". The project may not exist.`
-            }
-          ],
-          structuredContent: {
-            task: null
-          },
-          isError: true
-        };
-      }
-
+      const result = await projectService.listProjects(args.limit);
       return {
         content: [
           {
-            type: "text",
-            text: `Created task ${task.id}: "${task.title}".`
+            type: "text" as const,
+            text: `Loaded ${result.projects.length} project(s).`
           }
         ],
-        structuredContent: {
-          task
-        }
+        structuredContent: { ...result }
       };
     }
+  );
+
+  server.registerTool(
+    "create_goal",
+    {
+      title: "Create Goal",
+      description: "Create a goal inside an existing project.",
+      inputSchema: createGoalInputShape
+    },
+    async (args) => toToolResult(await goalService.createGoal(args))
+  );
+
+  server.registerTool(
+    "update_goal",
+    {
+      title: "Update Goal",
+      description: "Update goal state or metadata.",
+      inputSchema: updateGoalInputShape
+    },
+    async (args) => toToolResult(await goalService.updateGoal(args))
+  );
+
+  server.registerTool(
+    "get_goals",
+    {
+      title: "Get Goals",
+      description: "Load all goals for a project.",
+      inputSchema: goalListQueryShape
+    },
+    async (args) => toToolResult(await goalService.getGoals(args.projectId))
+  );
+
+  server.registerTool(
+    "create_task",
+    {
+      title: "Create Task",
+      description: "Create a new task inside a project goal.",
+      inputSchema: createTaskInputShape
+    },
+    async (args) => toToolResult(await taskService.createTask(args))
   );
 
   server.registerTool(
     "request_task",
     {
       title: "Request Task",
-      description: "Claim the next available task for an agent from the execution queue.",
-      inputSchema: requestTaskSchema
+      description: "Ask the orchestrator for the next available task in a project.",
+      inputSchema: requestTaskShape
     },
-    async (args) => {
-      const task = await taskService.requestTask(args);
-
-      if (!task) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `No task is currently available for project "${args.projectId}".`
-            }
-          ],
-          structuredContent: {
-            task: null
-          }
-        };
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Claimed task ${task.id} for ${task.assignedTo}.`
-          }
-        ],
-        structuredContent: {
-          task
-        }
-      };
-    }
+    async (args) => toToolResult(await executionLoop.run(args))
   );
 
   server.registerTool(
@@ -124,13 +160,9 @@ export function createMcpTransport({
     {
       title: "Start Task",
       description: "Mark an assigned task as in progress for the specified agent.",
-      inputSchema: taskActionSchema
+      inputSchema: taskActionShape
     },
-    async (args) => taskMutationResult(
-      await taskService.startTask(args.taskId, args.agentName),
-      `Task ${args.taskId} is now in progress.`,
-      `Task ${args.taskId} could not be started.`
-    )
+    async (args) => toToolResult(await taskService.startTask(args.taskId, args.agentName))
   );
 
   server.registerTool(
@@ -139,19 +171,18 @@ export function createMcpTransport({
       title: "Heartbeat Task",
       description: "Renew the lease for a claimed task.",
       inputSchema: {
-        ...taskActionSchema,
+        ...taskActionShape,
         leaseDurationSeconds: z.number().int().positive().optional()
       }
     },
-    async (args) => taskMutationResult(
-      await taskService.renewTaskLease(
-        args.taskId,
-        args.agentName,
-        args.leaseDurationSeconds ?? 900
-      ),
-      `Lease renewed for task ${args.taskId}.`,
-      `Task ${args.taskId} lease could not be renewed.`
-    )
+    async (args) =>
+      toToolResult(
+        await taskService.renewTaskLease(
+          args.taskId,
+          args.agentName,
+          args.leaseDurationSeconds ?? 900
+        )
+      )
   );
 
   server.registerTool(
@@ -160,18 +191,17 @@ export function createMcpTransport({
       title: "Complete Task",
       description: "Mark a claimed task as completed.",
       inputSchema: {
-        ...taskActionSchema,
+        ...taskActionShape,
         ...taskCompletionSchema.shape
       }
     },
-    async (args) => taskMutationResult(
-      await taskService.completeTask(args.taskId, args.agentName, {
-        summary: args.summary,
-        metadata: args.metadata
-      }),
-      `Task ${args.taskId} completed.`,
-      `Task ${args.taskId} could not be completed.`
-    )
+    async (args) =>
+      toToolResult(
+        await taskService.completeTask(args.taskId, args.agentName, {
+          summary: args.summary,
+          metadata: args.metadata
+        })
+      )
   );
 
   server.registerTool(
@@ -180,18 +210,17 @@ export function createMcpTransport({
       title: "Fail Task",
       description: "Mark a claimed task as failed.",
       inputSchema: {
-        ...taskActionSchema,
+        ...taskActionShape,
         ...taskFailureSchema.shape
       }
     },
-    async (args) => taskMutationResult(
-      await taskService.failTask(args.taskId, args.agentName, {
-        error: args.error,
-        metadata: args.metadata
-      }),
-      `Task ${args.taskId} marked as failed.`,
-      `Task ${args.taskId} could not be marked as failed.`
-    )
+    async (args) =>
+      toToolResult(
+        await taskService.failTask(args.taskId, args.agentName, {
+          error: args.error,
+          metadata: args.metadata
+        })
+      )
   );
 
   server.registerTool(
@@ -200,18 +229,17 @@ export function createMcpTransport({
       title: "Release Task",
       description: "Release a claimed task back to the queue.",
       inputSchema: {
-        ...taskActionSchema,
+        ...taskActionShape,
         ...taskReleaseSchema.shape
       }
     },
-    async (args) => taskMutationResult(
-      await taskService.releaseTask(args.taskId, args.agentName, {
-        reason: args.reason,
-        metadata: args.metadata
-      }),
-      `Task ${args.taskId} released back to the queue.`,
-      `Task ${args.taskId} could not be released.`
-    )
+    async (args) =>
+      toToolResult(
+        await taskService.releaseTask(args.taskId, args.agentName, {
+          reason: args.reason,
+          metadata: args.metadata
+        })
+      )
   );
 
   server.registerTool(
@@ -223,39 +251,7 @@ export function createMcpTransport({
         taskId: z.string().min(1)
       }
     },
-    async (args) => {
-      const task = await taskService.getTask(args.taskId);
-
-      if (!task) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Task ${args.taskId} was not found.`
-            }
-          ],
-          structuredContent: {
-            task: null,
-            events: []
-          }
-        };
-      }
-
-      const events = await taskService.listTaskEvents(args.taskId);
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Loaded task ${task.id} with ${events.length} lifecycle event(s).`
-          }
-        ],
-        structuredContent: {
-          task,
-          events
-        }
-      };
-    }
+    async (args) => toToolResult(await taskService.getTask(args.taskId))
   );
 
   return {
@@ -275,35 +271,28 @@ export function createMcpTransport({
   };
 }
 
-function taskMutationResult(
-  task: Awaited<ReturnType<TaskService["getTask"]>>,
-  successText: string,
-  failureText: string
-) {
-  if (!task) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: failureText
-        }
-      ],
-      structuredContent: {
-        task: null
-      },
-      isError: true
-    };
-  }
-
+function toToolResult(result: OperationResultDto) {
   return {
     content: [
       {
         type: "text" as const,
-        text: successText
+        text: renderMessage(result)
       }
     ],
     structuredContent: {
-      task
-    }
+      status: result.status,
+      message: result.message,
+      guidance: result.guidance,
+      ...(result.context ?? {})
+    },
+    isError: result.status !== "ok" && result.status !== "no_task_available"
   };
+}
+
+function renderMessage(result: OperationResultDto): string {
+  if (result.guidance.length === 0) {
+    return result.message;
+  }
+
+  return `${result.message}\n\nNext steps:\n- ${result.guidance.join("\n- ")}`;
 }

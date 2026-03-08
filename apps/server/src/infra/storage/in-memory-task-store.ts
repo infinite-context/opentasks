@@ -2,21 +2,23 @@ import { randomUUID } from "node:crypto";
 import type { Logger } from "../logging";
 import type {
   ClaimedTask,
+  CreateGoalInput,
+  CreateProjectInput,
+  CreateTaskInput,
+  GoalRecord,
   ProjectRecord,
+  TaskClaimOptions,
+  TaskCompletion,
   TaskEvent,
   TaskEventActorType,
   TaskEventType,
-  TaskRecord
-} from "@opentasks/contracts";
-import type {
-  CreateTaskInput,
-  TaskClaimOptions,
-  TaskCompletion,
   TaskFailure,
   TaskQueryFilters,
-  TaskRelease
+  TaskRecord,
+  TaskRelease,
+  UpdateGoalInput
 } from "@opentasks/contracts";
-import type { TaskStore } from "./task-store";
+import type { CoordinationStore } from "./task-store";
 
 interface CreateInMemoryTaskStoreParams {
   logger: Logger;
@@ -31,7 +33,7 @@ function createLocalId(prefix: string): string {
   return `${prefix}_${randomUUID().replace(/-/g, "")}`;
 }
 
-function createProject(key: string, name: string): ProjectRecord {
+function createProjectSeed(key: string, name: string): ProjectRecord {
   const now = currentTimestamp();
 
   return {
@@ -43,12 +45,26 @@ function createProject(key: string, name: string): ProjectRecord {
   };
 }
 
-const demoProject = createProject("demo-project", "Demo Project");
-const otherProject = createProject("other-project", "Other Project");
-const defaultProjects: ProjectRecord[] = [demoProject, otherProject];
+function createGoalSeed(projectId: string, key: string, name: string, priority: GoalRecord["priority"]): GoalRecord {
+  const now = currentTimestamp();
 
-function createTask(
+  return {
+    id: createLocalId("goal"),
+    projectId,
+    key,
+    name,
+    description: "",
+    status: "active",
+    priority,
+    metadata: {},
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function createTaskSeed(
   projectId: string,
+  goalId: string,
   title: string,
   overrides: Partial<TaskRecord> = {}
 ): TaskRecord {
@@ -59,6 +75,7 @@ function createTask(
     createdAt: now,
     updatedAt: now,
     projectId,
+    goalId,
     title,
     description: "",
     status: "available",
@@ -79,17 +96,24 @@ function createTask(
   };
 }
 
-const seededPrimaryTask = createTask(demoProject.id, "Hydrate the next task with reusable context", {
+const demoProject = createProjectSeed("demo-project", "Demo Project");
+const otherProject = createProjectSeed("other-project", "Other Project");
+const demoGoal = createGoalSeed(demoProject.id, "initial-goal", "Initial Goal", "P0");
+const otherGoal = createGoalSeed(otherProject.id, "initial-goal", "Initial Goal", "P1");
+const defaultProjects: ProjectRecord[] = [demoProject, otherProject];
+const defaultGoals: GoalRecord[] = [demoGoal, otherGoal];
+
+const seededPrimaryTask = createTaskSeed(demoProject.id, demoGoal.id, "Hydrate the next task with reusable context", {
   priority: "P0",
   description: "Seeded task used by the current execution path."
 });
 
-const seededDependentTask = createTask(demoProject.id, "Prepare a follow-up task for the same project", {
+const seededDependentTask = createTaskSeed(demoProject.id, demoGoal.id, "Prepare a follow-up task for the same project", {
   priority: "P1",
   dependencyIds: [seededPrimaryTask.id]
 });
 
-const seededOtherProjectTask = createTask(otherProject.id, "Unrelated task for another project", {
+const seededOtherProjectTask = createTaskSeed(otherProject.id, otherGoal.id, "Unrelated task for another project", {
   priority: "P2"
 });
 
@@ -97,6 +121,13 @@ const defaultTasks: TaskRecord[] = [seededPrimaryTask, seededDependentTask, seed
 
 function cloneProject(project: ProjectRecord): ProjectRecord {
   return { ...project };
+}
+
+function cloneGoal(goal: GoalRecord): GoalRecord {
+  return {
+    ...goal,
+    metadata: { ...goal.metadata }
+  };
 }
 
 function cloneTask(task: TaskRecord): TaskRecord {
@@ -149,22 +180,133 @@ function resolveProjectId(projects: ProjectRecord[], projectRef?: string): strin
   return project?.id ?? null;
 }
 
+function compareTaskPriority(left: TaskRecord, right: TaskRecord): number {
+  const ordering = { P0: 0, P1: 1, P2: 2, P3: 3 };
+  return ordering[left.priority] - ordering[right.priority];
+}
+
 export function createInMemoryTaskStore({
   logger,
   initialTasks = defaultTasks
-}: CreateInMemoryTaskStoreParams): TaskStore {
+}: CreateInMemoryTaskStoreParams): CoordinationStore {
   const projects = defaultProjects.map(cloneProject);
+  const goals = defaultGoals.map(cloneGoal);
   const tasks = initialTasks.map(cloneTask);
-  const events: TaskEvent[] = [
-    createEvent(tasks[0], "task_created", "system", null),
-    createEvent(tasks[0], "task_available", "system", null),
-    createEvent(tasks[1], "task_created", "system", null),
-    createEvent(tasks[1], "task_available", "system", null),
-    createEvent(tasks[2], "task_created", "system", null),
-    createEvent(tasks[2], "task_available", "system", null)
-  ];
+  const events: TaskEvent[] = tasks.flatMap((task) => [
+    createEvent(task, "task_created", "system", null),
+    createEvent(task, "task_available", "system", null)
+  ]);
 
   return {
+    async createProject(input: CreateProjectInput): Promise<ProjectRecord> {
+      const existing = projects.find((project) => project.key === input.key);
+      if (existing) {
+        return cloneProject(existing);
+      }
+
+      const now = currentTimestamp();
+      const project: ProjectRecord = {
+        id: createLocalId("project"),
+        key: input.key,
+        name: input.name,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      projects.push(project);
+      return cloneProject(project);
+    },
+    async getProject(projectRef: string): Promise<ProjectRecord | null> {
+      const project = projects.find((candidate) => candidate.id === projectRef || candidate.key === projectRef);
+      return project ? cloneProject(project) : null;
+    },
+    async listProjects(limit?: number): Promise<ProjectRecord[]> {
+      return projects.slice(0, limit ?? projects.length).map(cloneProject);
+    },
+    async createGoal(input: CreateGoalInput): Promise<GoalRecord | null> {
+      const projectId = resolveProjectId(projects, input.projectId);
+      if (!projectId) {
+        return null;
+      }
+
+      const existing = goals.find((goal) => goal.projectId === projectId && goal.key === input.key);
+      if (existing) {
+        return cloneGoal(existing);
+      }
+
+      const now = currentTimestamp();
+      const goal: GoalRecord = {
+        id: createLocalId("goal"),
+        projectId,
+        key: input.key,
+        name: input.name,
+        description: input.description ?? "",
+        status: "active",
+        priority: input.priority ?? "P2",
+        metadata: input.metadata ?? {},
+        createdAt: now,
+        updatedAt: now
+      };
+
+      goals.push(goal);
+      return cloneGoal(goal);
+    },
+    async updateGoal(input: UpdateGoalInput): Promise<GoalRecord | null> {
+      const goal = goals.find((candidate) => candidate.id === input.goalId);
+      if (!goal) {
+        return null;
+      }
+
+      if (input.projectId) {
+        const projectId = resolveProjectId(projects, input.projectId);
+        if (!projectId || projectId !== goal.projectId) {
+          return null;
+        }
+      }
+
+      if (input.name !== undefined) {
+        goal.name = input.name;
+      }
+      if (input.description !== undefined) {
+        goal.description = input.description;
+      }
+      if (input.status !== undefined) {
+        goal.status = input.status;
+      }
+      if (input.priority !== undefined) {
+        goal.priority = input.priority;
+      }
+      if (input.metadata !== undefined) {
+        goal.metadata = { ...input.metadata };
+      }
+
+      goal.updatedAt = currentTimestamp();
+      return cloneGoal(goal);
+    },
+    async getGoal(goalId: string): Promise<GoalRecord | null> {
+      const goal = goals.find((candidate) => candidate.id === goalId);
+      return goal ? cloneGoal(goal) : null;
+    },
+    async listGoals(projectRef: string): Promise<GoalRecord[]> {
+      const projectId = resolveProjectId(projects, projectRef);
+      if (!projectId) {
+        return [];
+      }
+
+      return goals
+        .filter((goal) => goal.projectId === projectId)
+        .sort((left, right) => {
+          const priorityDiff = compareTaskPriority(
+            { priority: left.priority } as TaskRecord,
+            { priority: right.priority } as TaskRecord
+          );
+          if (priorityDiff !== 0) {
+            return priorityDiff;
+          }
+          return left.createdAt.localeCompare(right.createdAt);
+        })
+        .map(cloneGoal);
+    },
     async createTask(input: CreateTaskInput): Promise<TaskRecord | null> {
       const projectId = resolveProjectId(projects, input.projectId);
       if (!projectId) {
@@ -175,12 +317,22 @@ export function createInMemoryTaskStore({
         return null;
       }
 
+      const goal = goals.find((candidate) => candidate.id === input.goalId && candidate.projectId === projectId);
+      if (!goal) {
+        logger.step(
+          "storage:in-memory-task-store",
+          `Cannot create task: goal "${input.goalId}" not found in project "${projectId}".`
+        );
+        return null;
+      }
+
       const now = currentTimestamp();
       const task: TaskRecord = {
         id: createLocalId("task"),
         createdAt: now,
         updatedAt: now,
         projectId,
+        goalId: goal.id,
         title: input.title,
         description: input.description ?? "",
         status: "available",
@@ -203,13 +355,13 @@ export function createInMemoryTaskStore({
       events.push(createEvent(task, "task_created", "system", null));
       events.push(createEvent(task, "task_available", "system", null));
 
-      logger.step("storage:in-memory-task-store", `Created task "${task.id}" in project "${input.projectId}".`);
+      logger.step("storage:in-memory-task-store", `Created task "${task.id}" in goal "${goal.id}".`);
       return cloneTask(task);
     },
-    async claimNextTask(projectRef, agentName, options): Promise<ClaimedTask | null> {
+    async claimNextTask(projectRef, goalId, agentName, options): Promise<ClaimedTask | null> {
       logger.step(
         "storage:in-memory-task-store",
-        `In-memory task store looks for the next available task in project "${projectRef}".`
+        `In-memory task store looks for the next available task in goal "${goalId}".`
       );
 
       const projectId = resolveProjectId(projects, projectRef);
@@ -217,20 +369,37 @@ export function createInMemoryTaskStore({
         return null;
       }
 
-      await this.requeueExpiredTasks(projectId);
+      const goal = goals.find((candidate) => candidate.id === goalId && candidate.projectId === projectId);
+      if (!goal || goal.status !== "active") {
+        return null;
+      }
 
-      const task = tasks.find(
-        (candidate) =>
-          candidate.projectId === projectId &&
-          candidate.status === "available" &&
-          hasSatisfiedDependencies(candidate, tasks)
-      );
+      await this.requeueExpiredTasks(projectId, goalId);
+
+      const task = tasks
+        .filter((candidate) => {
+          const availableAt = candidate.availableAt ? new Date(candidate.availableAt).getTime() : 0;
+          return (
+            candidate.projectId === projectId &&
+            candidate.goalId === goalId &&
+            candidate.status === "available" &&
+            availableAt <= Date.now() &&
+            hasSatisfiedDependencies(candidate, tasks)
+          );
+        })
+        .sort((left, right) => {
+          const priorityDiff = compareTaskPriority(left, right);
+          if (priorityDiff !== 0) {
+            return priorityDiff;
+          }
+          const availableAtDiff = (left.availableAt ?? "").localeCompare(right.availableAt ?? "");
+          if (availableAtDiff !== 0) {
+            return availableAtDiff;
+          }
+          return left.createdAt.localeCompare(right.createdAt);
+        })[0];
 
       if (!task) {
-        logger.step(
-          "storage:in-memory-task-store",
-          `In-memory task store found no available task for project "${projectRef}".`
-        );
         return null;
       }
 
@@ -253,10 +422,6 @@ export function createInMemoryTaskStore({
 
       return cloneTask(task) as ClaimedTask;
     },
-    async getProject(projectRef: string): Promise<ProjectRecord | null> {
-      const project = projects.find((candidate) => candidate.id === projectRef || candidate.key === projectRef);
-      return project ? cloneProject(project) : null;
-    },
     async getTaskById(taskId: string): Promise<TaskRecord | null> {
       const task = tasks.find((candidate) => candidate.id === taskId);
       return task ? cloneTask(task) : null;
@@ -266,22 +431,21 @@ export function createInMemoryTaskStore({
 
       return tasks
         .filter((task) => {
-          if (filters?.projectId && projectId && task.projectId !== projectId) {
-            return false;
-          }
-
           if (filters?.projectId && !projectId) {
             return false;
           }
-
+          if (projectId && task.projectId !== projectId) {
+            return false;
+          }
+          if (filters?.goalId && task.goalId !== filters.goalId) {
+            return false;
+          }
           if (filters?.assignedTo && task.assignedTo !== filters.assignedTo) {
             return false;
           }
-
           if (filters?.status && !filters.status.includes(task.status)) {
             return false;
           }
-
           return true;
         })
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
@@ -392,7 +556,7 @@ export function createInMemoryTaskStore({
 
       return cloneTask(task);
     },
-    async requeueExpiredTasks(projectRef?: string): Promise<number> {
+    async requeueExpiredTasks(projectRef?: string, goalId?: string): Promise<number> {
       const projectId = resolveProjectId(projects, projectRef) ?? projectRef ?? null;
       let updatedCount = 0;
 
@@ -400,8 +564,9 @@ export function createInMemoryTaskStore({
         const leaseExpired =
           task.leaseExpiresAt !== null && new Date(task.leaseExpiresAt).getTime() <= Date.now();
         const projectMatches = projectId ? task.projectId === projectId : true;
+        const goalMatches = goalId ? task.goalId === goalId : true;
 
-        if (projectMatches && leaseExpired && (task.status === "assigned" || task.status === "in_progress")) {
+        if (projectMatches && goalMatches && leaseExpired && (task.status === "assigned" || task.status === "in_progress")) {
           task.status = "available";
           task.assignedTo = null;
           task.assignedAt = null;

@@ -2,12 +2,15 @@ import fastify from "fastify";
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from "fastify-type-provider-zod";
 import { FastifySSEPlugin } from "fastify-sse-v2";
 import {
+  createProjectInputSchema,
   dashboardQuerySchema,
   dashboardStreamEventDtoSchema,
+  projectListQuerySchema,
   taskListQuerySchema
 } from "@opentasks/contracts/schemas";
 import type { Logger } from "../../infra/logging";
 import type { DashboardQueryService } from "../../system/dashboard-query-service";
+import type { ProjectService } from "../../system/project-service";
 import type { TaskQueryService } from "../../system/task-query-service";
 import type { HttpTransport } from "./types";
 
@@ -17,6 +20,7 @@ interface CreateHttpTransportParams {
   appVersion: string;
   projectPath: string;
   port: number;
+  projectService: ProjectService;
   dashboardQueryService: DashboardQueryService;
   taskQueryService: TaskQueryService;
 }
@@ -27,6 +31,7 @@ export function createHttpTransport({
   appVersion,
   projectPath,
   port,
+  projectService,
   dashboardQueryService,
   taskQueryService
 }: CreateHttpTransportParams): HttpTransport {
@@ -42,12 +47,36 @@ export function createHttpTransport({
 
   server.addHook("onRequest", async (request, reply) => {
     reply.header("Access-Control-Allow-Origin", "*");
-    reply.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    reply.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     reply.header("Access-Control-Allow-Headers", "Content-Type");
   });
 
   server.options("*", async (request, reply) => {
     return reply.status(204).send();
+  });
+
+  server.get("/api/projects", {
+    schema: {
+      querystring: projectListQuerySchema
+    }
+  }, async (request, reply) => {
+    const result = await projectService.listProjects(request.query.limit);
+    return reply.status(200).send(result);
+  });
+
+  server.post("/api/projects", {
+    schema: {
+      body: createProjectInputSchema
+    }
+  }, async (request, reply) => {
+    const result = await projectService.createProject(request.body);
+    const project = result.context?.project;
+
+    if (!project) {
+      return reply.status(400).send(result);
+    }
+
+    return reply.status(201).send(project);
   });
 
   server.get("/api/dashboard", {

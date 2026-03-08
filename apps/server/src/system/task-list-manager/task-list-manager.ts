@@ -12,13 +12,13 @@ export function createTaskListManager({
   taskStore
 }: CreateTaskListManagerParams): TaskListManager {
   return {
-    async claimNextTask(projectId, agentName, options) {
+    async claimNextTask(projectId, goalId, agentName, options) {
       logger.step(
         "task-list-manager",
-        "Task list manager asks the task store to claim the next available task."
+        `Task list manager asks the task store to claim the next available task in goal "${goalId}".`
       );
 
-      return taskStore.claimNextTask(projectId, agentName, options);
+      return taskStore.claimNextTask(projectId, goalId, agentName, options);
     }
   };
 }
