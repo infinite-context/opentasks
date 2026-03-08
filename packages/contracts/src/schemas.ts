@@ -35,6 +35,8 @@ export const projectRecordSchema = z.object({
   id: z.string().min(1),
   key: z.string().min(1),
   name: z.string().min(1),
+  description: z.string().default(""),
+  workingDirectory: z.string().default(""),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1)
 });
@@ -112,7 +114,9 @@ export const createTaskInputSchema = z.object({
 
 export const createProjectInputSchema = z.object({
   key: z.string().min(1),
-  name: z.string().min(1)
+  name: z.string().min(1),
+  description: z.string().min(1),
+  workingDirectory: z.string().min(1)
 });
 
 export const projectListQuerySchema = z.object({

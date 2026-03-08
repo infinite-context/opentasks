@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { cwd } from "node:process";
 import type { Logger } from "../logging";
 import type { Database } from "better-sqlite3";
 
@@ -18,6 +20,8 @@ export function applySqliteSchema(db: Database, logger: Logger): void {
       id TEXT PRIMARY KEY,
       key TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      working_directory TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -88,6 +92,7 @@ export function applySqliteSchema(db: Database, logger: Logger): void {
   `);
 
   ensureTasksGoalColumn(db);
+  ensureProjectDescriptionAndWorkingDir(db, logger);
   ensureSqliteIndexes(db);
   backfillProjectGoals(db, logger);
 }
@@ -101,17 +106,20 @@ export function seedSqliteDemoData(db: Database, logger: Logger): void {
     return;
   }
 
+  const workingDir = resolve(cwd(), ".");
   const insertProject = db.prepare(`
-    INSERT INTO projects (id, key, name)
-    VALUES (?, 'demo-project', 'Demo Project')
+    INSERT INTO projects (id, key, name, description, working_directory)
+    VALUES (?, 'demo-project', 'Demo Project', 'Demo project for exploring OpenTasks.', ?)
     ON CONFLICT (key) DO UPDATE SET
       name = excluded.name,
+      description = excluded.description,
+      working_directory = excluded.working_directory,
       updated_at = datetime('now')
     RETURNING id
   `);
-  
+
   const projectId = generateId("project");
-  insertProject.run(projectId);
+  insertProject.run(projectId, workingDir);
 
   const goalId = generateId("goal");
   db.prepare(`
@@ -200,6 +208,21 @@ function ensureTasksGoalColumn(db: Database): void {
 
   if (!hasGoalId) {
     db.exec("ALTER TABLE tasks ADD COLUMN goal_id TEXT REFERENCES goals(id) ON DELETE CASCADE;");
+  }
+}
+
+function ensureProjectDescriptionAndWorkingDir(db: Database, logger: Logger): void {
+  const columns = db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+  const hasDescription = columns.some((c) => c.name === "description");
+  const hasWorkingDir = columns.some((c) => c.name === "working_directory");
+
+  if (!hasDescription) {
+    db.exec("ALTER TABLE projects ADD COLUMN description TEXT NOT NULL DEFAULT '';");
+    logger.step("storage:sqlite-schema", "Added description column to projects.");
+  }
+  if (!hasWorkingDir) {
+    db.exec("ALTER TABLE projects ADD COLUMN working_directory TEXT NOT NULL DEFAULT '';");
+    logger.step("storage:sqlite-schema", "Added working_directory column to projects.");
   }
 }
 

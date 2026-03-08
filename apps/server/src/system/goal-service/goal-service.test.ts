@@ -15,7 +15,9 @@ test("goal service resolves the next claimable goal for a project", async () => 
   const store = createInMemoryTaskStore({ logger });
   const project = await store.createProject({
     key: "goal-resolution-project",
-    name: "Goal Resolution Project"
+    name: "Goal Resolution Project",
+    description: "Project for testing goal resolution",
+    workingDirectory: "."
   });
   const firstGoal = await store.createGoal({
     projectId: project.id,

@@ -64,6 +64,8 @@ export function renderSidebar(
       <nav class="nav">
         ${renderNavSection("Overview", [
           { id: "dashboard", label: "Dashboard", icon: "fa-solid fa-table-columns" },
+          { id: "project", label: "Project", icon: "fa-solid fa-folder-tree" },
+          { id: "goals", label: "Goals", icon: "fa-solid fa-bullseye" },
           { id: "tasks", label: "Tasks", icon: "fa-solid fa-list-check" },
           { id: "agents", label: "Agents", icon: "fa-solid fa-wrench" },
           { id: "analytics", label: "Analytics", icon: "fa-solid fa-chart-line" },

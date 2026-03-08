@@ -1,6 +1,7 @@
-import type { OperationResultDto } from "@opentasks/contracts";
+import type { CreateProjectInput, OperationResultDto } from "@opentasks/contracts";
 
 export interface ValidationService {
+  validateCreateProjectInput(input: CreateProjectInput, basePath?: string): Promise<OperationResultDto>;
   ensureProject(projectRef: string): Promise<OperationResultDto>;
   ensureProjectGoals(projectRef: string): Promise<OperationResultDto>;
   ensureGoalInProject(projectRef: string, goalId: string): Promise<OperationResultDto>;

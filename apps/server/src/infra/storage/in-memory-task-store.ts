@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { cwd as getCwd } from "node:process";
 import type { Logger } from "../logging";
 import type {
   ClaimedTask,
@@ -33,13 +35,20 @@ function createLocalId(prefix: string): string {
   return `${prefix}_${randomUUID().replace(/-/g, "")}`;
 }
 
-function createProjectSeed(key: string, name: string): ProjectRecord {
+function createProjectSeed(
+  key: string,
+  name: string,
+  description: string,
+  workingDirectory: string
+): ProjectRecord {
   const now = currentTimestamp();
 
   return {
     id: createLocalId("project"),
     key,
     name,
+    description,
+    workingDirectory,
     createdAt: now,
     updatedAt: now
   };
@@ -96,8 +105,19 @@ function createTaskSeed(
   };
 }
 
-const demoProject = createProjectSeed("demo-project", "Demo Project");
-const otherProject = createProjectSeed("other-project", "Other Project");
+const defaultWorkingDir = resolve(getCwd(), ".");
+const demoProject = createProjectSeed(
+  "demo-project",
+  "Demo Project",
+  "Demo project for exploring OpenTasks.",
+  defaultWorkingDir
+);
+const otherProject = createProjectSeed(
+  "other-project",
+  "Other Project",
+  "Another project for testing multi-project workflows.",
+  defaultWorkingDir
+);
 const demoGoal = createGoalSeed(demoProject.id, "initial-goal", "Initial Goal", "P0");
 const otherGoal = createGoalSeed(otherProject.id, "initial-goal", "Initial Goal", "P1");
 const defaultProjects: ProjectRecord[] = [demoProject, otherProject];
@@ -209,6 +229,8 @@ export function createInMemoryTaskStore({
         id: createLocalId("project"),
         key: input.key,
         name: input.name,
+        description: input.description,
+        workingDirectory: input.workingDirectory,
         createdAt: now,
         updatedAt: now
       };

@@ -30,6 +30,8 @@ export type TaskOutcome = "success" | "failure";
 export interface ProjectRecord extends AuditableModel {
   key: string;
   name: string;
+  description: string;
+  workingDirectory: string;
 }
 
 export interface GoalRecord extends AuditableModel {
@@ -88,6 +90,7 @@ export interface MemoryArtifact extends IdentityModel {
 
 export type OperationStatus =
   | "ok"
+  | "invalid_input"
   | "missing_project"
   | "missing_goals"
   | "project_not_found"

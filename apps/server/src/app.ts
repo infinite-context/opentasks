@@ -55,13 +55,16 @@ export function createApp(overrides?: Partial<AppEnv>): App {
       ? createSqliteTaskDatabase({ logger, db })
       : createInMemoryTaskStore({ logger });
 
+  const projectPath = process.env.OPENTASKS_PROJECT_PATH ?? getCwd();
   const validationService = createValidationService({
     logger,
-    store: taskStore
+    store: taskStore,
+    projectPath
   });
   const projectService = createProjectService({
     logger,
-    projectStore: taskStore
+    projectStore: taskStore,
+    validationService
   });
   const goalService = createGoalService({
     logger,
@@ -110,7 +113,6 @@ export function createApp(overrides?: Partial<AppEnv>): App {
         executionLoop
       })
     : null;
-  const projectPath = process.env.OPENTASKS_PROJECT_PATH ?? getCwd();
   const httpTransport = env.httpEnabled
     ? createHttpTransport({
         logger,
@@ -119,6 +121,7 @@ export function createApp(overrides?: Partial<AppEnv>): App {
         projectPath,
         port: env.httpPort,
         projectService,
+        goalService,
         dashboardQueryService,
         taskQueryService
       })

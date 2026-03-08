@@ -51,7 +51,9 @@ export function createSqliteTaskDatabase({
       db.insert(schema.projects).values({
         id: projectId,
         key: input.key,
-        name: input.name
+        name: input.name,
+        description: input.description,
+        workingDirectory: input.workingDirectory
       }).run();
 
       return getProjectByIdOrKeyFromDb(db, projectId)!;
@@ -635,6 +637,8 @@ function mapProjectRow(row: any): ProjectRecord {
     id: row.id,
     key: row.key,
     name: row.name,
+    description: row.description ?? "",
+    workingDirectory: row.workingDirectory ?? "",
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };

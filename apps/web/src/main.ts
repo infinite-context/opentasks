@@ -1,5 +1,6 @@
 import "@fortawesome/fontawesome-free/css/all.min.css";
 import {
+  goalListDtoSchema,
   projectListDtoSchema,
   projectRecordSchema,
   dashboardSnapshotDtoSchema,
@@ -7,6 +8,7 @@ import {
   taskDetailDtoSchema,
   taskListDtoSchema,
   type DashboardSnapshotDto,
+  type GoalRecord,
   type ProjectRecord,
   type TaskRecord
 } from "@opentasks/contracts";
@@ -16,6 +18,8 @@ import { renderSidebar, renderTopbar } from "./components";
 import { DEFAULT_PROJECT_ID } from "./config";
 import {
   buildAnalyticsChartData,
+  buildGoalListUrl,
+  buildPickFolderUrl,
   buildProjectListUrl,
   buildDashboardApiUrl,
   buildDashboardStreamUrl,
@@ -23,6 +27,7 @@ import {
   buildMetaUrl,
   buildTaskDetailUrl,
   buildTaskListUrl,
+  buildValidatePathUrl,
   createProjectRequest,
   destroyAnalyticsCharts,
   filterTasks,
@@ -38,8 +43,10 @@ import {
   renderAgentsView,
   renderAnalyticsView,
   renderDashboardView,
+  renderGoalsView,
   renderMcpView,
   renderPlaceholderView,
+  renderProjectView,
   renderProjectsView,
   renderSettingsView,
   renderSystemHealthView,
@@ -55,6 +62,8 @@ let currentView: ViewId = "dashboard";
 let currentProjectId = DEFAULT_PROJECT_ID;
 let projects: ProjectRecord[] = [];
 let isProjectMenuOpen = false;
+let goals: GoalRecord[] = [];
+let selectedGoalId = "";
 let selectedTaskId = "";
 let activeTaskFilter: TaskFilter = "all";
 let dashboardSnapshot: DashboardSnapshotDto | null = null;
@@ -64,8 +73,10 @@ let selectedAgentName = "";
 let connectionState: ConnectionState = "connecting";
 let errorMessage = "";
 let tasksViewErrorMessage = "";
+let goalsViewErrorMessage = "";
 let isLoading = true;
 let tasksViewLoading = false;
+let goalsViewLoading = false;
 let dashboardStream: EventSource | null = null;
 let mcpProjectPath: string | null = null;
 let mcpErrorMessage = "";
@@ -73,6 +84,12 @@ let mcpLoading = false;
 let mcpConfigJson = "";
 let projectFormName = "";
 let projectFormKey = "";
+let projectFormDescription = "";
+let projectFormWorkingDirectory = "";
+let projectFormWorkingDirectoryValid: boolean | null = null;
+let projectFormWorkingDirectoryError = "";
+let projectFormWorkingDirectoryValidateTimeout: ReturnType<typeof setTimeout> | null = null;
+let projectFormBrowseLoading = false;
 let projectFormError = "";
 let projectFormSubmitting = false;
 
@@ -132,6 +149,40 @@ async function loadDashboardSnapshot(): Promise<void> {
     connectionState = "disconnected";
   } finally {
     isLoading = false;
+    renderApp();
+  }
+}
+
+async function loadGoals(): Promise<void> {
+  goalsViewLoading = true;
+  goalsViewErrorMessage = "";
+  renderApp();
+
+  try {
+    const [goalsResponse, tasksResponse] = await Promise.all([
+      fetch(buildGoalListUrl(currentProjectId)),
+      fetch(buildTaskListUrl({ projectId: currentProjectId, limit: 200 }))
+    ]);
+
+    if (!goalsResponse.ok) {
+      throw new Error(`Goals request failed with status ${goalsResponse.status}.`);
+    }
+    if (!tasksResponse.ok) {
+      throw new Error(`Task list request failed with status ${tasksResponse.status}.`);
+    }
+
+    const goalsDto = goalListDtoSchema.parse(await goalsResponse.json());
+    const tasksDto = taskListDtoSchema.parse(await tasksResponse.json());
+    goals = goalsDto.goals;
+    taskList = tasksDto.tasks;
+    selectedGoalId = goals.find((goal) => goal.id === selectedGoalId)?.id ?? goals[0]?.id ?? "";
+  } catch (error) {
+    goalsViewErrorMessage = error instanceof Error ? error.message : "Unable to load goals.";
+    goals = [];
+    taskList = [];
+    selectedGoalId = "";
+  } finally {
+    goalsViewLoading = false;
     renderApp();
   }
 }
@@ -242,6 +293,10 @@ async function loadMcpMeta(): Promise<void> {
 
 async function loadDataForCurrentView(): Promise<void> {
   switch (currentView) {
+    case "project":
+    case "goals":
+      await loadGoals();
+      break;
     case "dashboard":
       await loadDashboardSnapshot();
       break;
@@ -277,8 +332,45 @@ async function loadDataForCurrentView(): Promise<void> {
   }
 }
 
+function resolveCurrentProject(): ProjectRecord | null {
+  const byId = projects.find(
+    (p) => p.id === currentProjectId || p.key === currentProjectId
+  );
+  if (byId) return byId;
+  const fromSnapshot = dashboardSnapshot?.project;
+  if (fromSnapshot) {
+    return {
+      id: fromSnapshot.id ?? fromSnapshot.key ?? currentProjectId,
+      key: fromSnapshot.key ?? currentProjectId,
+      name: fromSnapshot.name ?? fromSnapshot.key ?? currentProjectId,
+      description: fromSnapshot.description ?? "",
+      workingDirectory: fromSnapshot.workingDirectory ?? "",
+      createdAt: fromSnapshot.createdAt ?? "",
+      updatedAt: fromSnapshot.updatedAt ?? ""
+    };
+  }
+  return {
+    id: currentProjectId,
+    key: currentProjectId,
+    name: currentProjectId,
+    description: "",
+    workingDirectory: "",
+    createdAt: "",
+    updatedAt: ""
+  };
+}
+
 function renderMainContent(): string {
   switch (currentView) {
+    case "project":
+      return renderProjectView({
+        project: resolveCurrentProject(),
+        goals,
+        tasks: taskList,
+        selectedTaskId,
+        errorMessage: goalsViewErrorMessage,
+        isLoading: goalsViewLoading
+      });
     case "dashboard": {
       const snapshot = dashboardSnapshot;
       const allTasks = snapshot?.tasks ?? [];
@@ -299,6 +391,15 @@ function renderMainContent(): string {
         isLoading
       });
     }
+    case "goals":
+      return renderGoalsView({
+        goals,
+        tasks: taskList,
+        selectedGoalId,
+        selectedTaskId,
+        errorMessage: goalsViewErrorMessage,
+        isLoading: goalsViewLoading
+      });
     case "tasks": {
       const selectedTask = taskList.find((t) => t.id === selectedTaskId) ?? null;
       return renderTasksView({
@@ -340,6 +441,11 @@ function renderMainContent(): string {
       return renderProjectsView({
         keyValue: projectFormKey,
         nameValue: projectFormName,
+        descriptionValue: projectFormDescription,
+        workingDirectoryValue: projectFormWorkingDirectory,
+        workingDirectoryValid: projectFormWorkingDirectoryValid,
+        workingDirectoryError: projectFormWorkingDirectoryError,
+        browseLoading: projectFormBrowseLoading,
         errorMessage: projectFormError,
         isSubmitting: projectFormSubmitting
       });
@@ -365,10 +471,17 @@ function getPlaceholderTitle(view: ViewId): string {
 
 function getTopbarProps(): { title: string; subtitle: string } {
   switch (currentView) {
+    case "project":
+      return {
+        title: resolveCurrentProject()?.name ?? "Project",
+        subtitle: "Goals and tasks"
+      };
     case "projects":
       return { title: "Projects", subtitle: "Workspace setup" };
     case "dashboard":
       return { title: "Dashboard", subtitle: "Live dashboard" };
+    case "goals":
+      return { title: "Goals", subtitle: "Project goals" };
     case "tasks":
       return { title: "Tasks", subtitle: "Task list" };
     case "agents":
@@ -505,6 +618,8 @@ function bindEvents(): void {
       }
 
       currentProjectId = nextProjectId;
+      goals = [];
+      selectedGoalId = "";
       selectedTaskId = "";
       selectedAgentName = "";
       dashboardSnapshot = null;
@@ -526,6 +641,10 @@ function bindEvents(): void {
     isProjectMenuOpen = false;
     currentView = "projects";
     projectFormError = "";
+    projectFormDescription = "";
+    projectFormWorkingDirectory = "";
+    projectFormWorkingDirectoryValid = null;
+    projectFormWorkingDirectoryError = "";
     if (dashboardStream) {
       dashboardStream.close();
       dashboardStream = null;
@@ -545,6 +664,43 @@ function bindEvents(): void {
     projectFormKey = (event.target as HTMLInputElement).value;
   });
 
+  document.querySelector<HTMLInputElement>("[data-project-description-input]")?.addEventListener("input", (event) => {
+    projectFormDescription = (event.target as HTMLInputElement).value;
+  });
+
+  document.querySelector<HTMLInputElement>("[data-project-working-directory-input]")?.addEventListener("input", (event) => {
+    projectFormWorkingDirectory = (event.target as HTMLInputElement).value;
+    projectFormWorkingDirectoryValid = null;
+    projectFormWorkingDirectoryError = "";
+    if (projectFormWorkingDirectoryValidateTimeout) {
+      clearTimeout(projectFormWorkingDirectoryValidateTimeout);
+    }
+    projectFormWorkingDirectoryValidateTimeout = setTimeout(() => {
+      void validateWorkingDirectory(projectFormWorkingDirectory);
+    }, 400);
+    renderApp();
+  });
+
+  document.querySelector<HTMLButtonElement>("[data-project-browse]")?.addEventListener("click", async () => {
+    projectFormBrowseLoading = true;
+    renderApp();
+    try {
+      const response = await fetch(buildPickFolderUrl());
+      const data = (await response.json()) as { path: string | null };
+      if (data.path) {
+        projectFormWorkingDirectory = data.path;
+        projectFormWorkingDirectoryValid = true;
+        projectFormWorkingDirectoryError = "";
+        void validateWorkingDirectory(data.path);
+      }
+    } catch (e) {
+      console.error("Failed to pick folder", e);
+    } finally {
+      projectFormBrowseLoading = false;
+      renderApp();
+    }
+  });
+
   document.querySelector<HTMLFormElement>("[data-project-create-form]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void submitProjectForm();
@@ -552,12 +708,17 @@ function bindEvents(): void {
 
   document.querySelectorAll<HTMLElement>("[data-task-id]").forEach((row) => {
     row.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest("[data-agent-link]")) {
+      if ((e.target as HTMLElement).closest("[data-agent-link], [data-goal-link]")) {
         return;
       }
       selectedTaskId = row.dataset.taskId ?? selectedTaskId;
       if (currentView === "tasks") {
         void loadTaskDetail(selectedTaskId).then(renderApp);
+      } else if (currentView === "goals" || currentView === "project") {
+        currentView = "tasks";
+        void loadDataForCurrentView().then(() => {
+          void loadTaskDetail(selectedTaskId).then(renderApp);
+        });
       } else {
         renderApp();
       }
@@ -565,14 +726,113 @@ function bindEvents(): void {
     row.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        if ((e.target as HTMLElement).closest("[data-agent-link]")) {
+        if ((e.target as HTMLElement).closest("[data-agent-link], [data-goal-link]")) {
           return;
         }
         selectedTaskId = row.dataset.taskId ?? selectedTaskId;
         if (currentView === "tasks") {
           void loadTaskDetail(selectedTaskId).then(renderApp);
+        } else if (currentView === "goals" || currentView === "project") {
+          currentView = "tasks";
+          void loadDataForCurrentView().then(() => {
+            void loadTaskDetail(selectedTaskId).then(renderApp);
+          });
         } else {
           renderApp();
+        }
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLElement>("[data-goal-id]").forEach((row) => {
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("[data-project-link]")) {
+        return;
+      }
+      selectedGoalId = row.dataset.goalId ?? selectedGoalId;
+      renderApp();
+    });
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if ((event.target as HTMLElement).closest("[data-project-link]")) {
+          return;
+        }
+        selectedGoalId = row.dataset.goalId ?? selectedGoalId;
+        renderApp();
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLElement>("[data-goal-link]").forEach((el) => {
+    if (!el.dataset.goalId) return;
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      selectedGoalId = el.dataset.goalId ?? "";
+      currentView = "goals";
+      if (dashboardStream) {
+        dashboardStream.close();
+        dashboardStream = null;
+      }
+      void loadDataForCurrentView().then(renderApp);
+    });
+    el.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") && el.dataset.goalId) {
+        e.preventDefault();
+        e.stopPropagation();
+        selectedGoalId = el.dataset.goalId ?? "";
+        currentView = "goals";
+        if (dashboardStream) {
+          dashboardStream.close();
+          dashboardStream = null;
+        }
+        void loadDataForCurrentView().then(renderApp);
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLElement>("[data-project-link]").forEach((el) => {
+    if (!el.dataset.projectId) return;
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const projectId = el.dataset.projectId ?? "";
+      if (projectId && projectId !== currentProjectId) {
+        currentProjectId = projectId;
+        goals = [];
+        selectedGoalId = "";
+        selectedTaskId = "";
+        selectedAgentName = "";
+        dashboardSnapshot = null;
+        taskList = [];
+        taskDetailEvents = null;
+        if (dashboardStream) {
+          dashboardStream.close();
+          dashboardStream = null;
+        }
+        void loadDataForCurrentView().then(renderApp);
+      }
+    });
+    el.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") && el.dataset.projectId) {
+        e.preventDefault();
+        e.stopPropagation();
+        const projectId = el.dataset.projectId ?? "";
+        if (projectId && projectId !== currentProjectId) {
+          currentProjectId = projectId;
+          goals = [];
+          selectedGoalId = "";
+          selectedTaskId = "";
+          selectedAgentName = "";
+          dashboardSnapshot = null;
+          taskList = [];
+          taskDetailEvents = null;
+          if (dashboardStream) {
+            dashboardStream.close();
+            dashboardStream = null;
+          }
+          void loadDataForCurrentView().then(renderApp);
         }
       }
     });
@@ -651,12 +911,49 @@ function bindEvents(): void {
   });
 }
 
+async function validateWorkingDirectory(path: string): Promise<void> {
+  const trimmed = path.trim();
+  if (!trimmed) {
+    projectFormWorkingDirectoryValid = null;
+    projectFormWorkingDirectoryError = "";
+    return;
+  }
+  try {
+    const response = await fetch(buildValidatePathUrl(trimmed));
+    const data = (await response.json()) as { valid: boolean; resolved?: string; error?: string };
+    if (projectFormWorkingDirectory.trim() === trimmed) {
+      projectFormWorkingDirectoryValid = data.valid;
+      projectFormWorkingDirectoryError = data.error ?? "";
+      if (data.valid && data.resolved) {
+        projectFormWorkingDirectory = data.resolved;
+      }
+    }
+  } catch {
+    if (projectFormWorkingDirectory.trim() === trimmed) {
+      projectFormWorkingDirectoryValid = false;
+      projectFormWorkingDirectoryError = "Could not validate path.";
+    }
+  }
+}
+
 async function submitProjectForm(): Promise<void> {
   const name = projectFormName.trim();
   const key = normalizeProjectKey(projectFormKey || projectFormName);
+  const description = projectFormDescription.trim();
+  const workingDirectory = projectFormWorkingDirectory.trim();
 
   if (!name || !key) {
     projectFormError = "Project name and key are required.";
+    renderApp();
+    return;
+  }
+  if (!description) {
+    projectFormError = "Project description is required.";
+    renderApp();
+    return;
+  }
+  if (!workingDirectory) {
+    projectFormError = "Project working directory is required.";
     renderApp();
     return;
   }
@@ -666,15 +963,22 @@ async function submitProjectForm(): Promise<void> {
   renderApp();
 
   try {
-    const response = await createProjectRequest({ key, name });
+    const response = await createProjectRequest({ key, name, description, workingDirectory });
+    const body = await response.json();
+
     if (!response.ok) {
-      throw new Error(`Project create request failed with status ${response.status}.`);
+      const err = body as { message?: string };
+      throw new Error(err?.message ?? `Project create request failed with status ${response.status}.`);
     }
 
-    const project = projectRecordSchema.parse(await response.json());
+    const project = projectRecordSchema.parse(body);
     projectFormSubmitting = false;
     projectFormName = "";
     projectFormKey = "";
+    projectFormDescription = "";
+    projectFormWorkingDirectory = "";
+    projectFormWorkingDirectoryValid = null;
+    projectFormWorkingDirectoryError = "";
     currentProjectId = project.id;
     currentView = "dashboard";
     selectedAgentName = "";

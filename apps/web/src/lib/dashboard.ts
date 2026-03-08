@@ -30,12 +30,28 @@ export function buildMetaUrl(): string {
   return buildApiUrl("/api/meta");
 }
 
+export function buildValidatePathUrl(path: string): string {
+  return buildApiUrl("/api/validate-path", { path });
+}
+
+export function buildFsEntriesUrl(path?: string): string {
+  return buildApiUrl("/api/fs/entries", { path: path ?? "." });
+}
+
+export function buildPickFolderUrl(): string {
+  return buildApiUrl("/api/fs/pick-folder");
+}
+
 export function buildProjectListUrl(limit?: number): string {
   return buildApiUrl("/api/projects", limit ? { limit: String(limit) } : undefined);
 }
 
 export function buildProjectCreateUrl(): string {
   return buildApiUrl("/api/projects");
+}
+
+export function buildGoalListUrl(projectId: string): string {
+  return buildApiUrl("/api/goals", { projectId });
 }
 
 export function buildDashboardApiUrl(projectId: string): string {

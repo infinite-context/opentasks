@@ -22,6 +22,8 @@ export interface CreateTaskInput {
 export interface CreateProjectInput {
   key: string;
   name: string;
+  description: string;
+  workingDirectory: string;
 }
 
 export interface ProjectListQuery {
@@ -206,6 +208,9 @@ export interface OperationContextDto {
   goals?: GoalRecord[];
   task?: TaskRecord | ClaimedTask | null;
   events?: TaskEvent[];
+  input?: CreateProjectInput;
+  field?: string;
+  resolvedPath?: string;
 }
 
 export interface OperationResultDto {

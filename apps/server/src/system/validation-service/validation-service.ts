@@ -1,3 +1,6 @@
+import { existsSync, statSync } from "node:fs";
+import { resolve } from "node:path";
+import type { CreateProjectInput } from "@opentasks/contracts";
 import type { Logger } from "../../infra/logging";
 import type { CoordinationStore } from "../../infra/storage/task-store";
 import { issueResult, okResult } from "../service-result";
@@ -6,13 +9,63 @@ import type { ValidationService } from "./types";
 interface CreateValidationServiceParams {
   logger: Logger;
   store: CoordinationStore;
+  projectPath?: string;
 }
 
 export function createValidationService({
   logger,
-  store
+  store,
+  projectPath
 }: CreateValidationServiceParams): ValidationService {
   return {
+    async validateCreateProjectInput(input: CreateProjectInput, basePath?: string) {
+      const trimmedDesc = input.description?.trim() ?? "";
+      const trimmedDir = input.workingDirectory?.trim() ?? "";
+
+      if (!trimmedDesc) {
+        logger.step("validation-service", "Project creation rejected: description is required.");
+        return issueResult(
+          "invalid_input",
+          "Project description is required.",
+          ["Provide a non-empty description when creating a project."],
+          { field: "description" }
+        );
+      }
+
+      if (!trimmedDir) {
+        logger.step("validation-service", "Project creation rejected: working directory is required.");
+        return issueResult(
+          "invalid_input",
+          "Project working directory is required.",
+          ["Provide a non-empty working directory path when creating a project."],
+          { field: "workingDirectory" }
+        );
+      }
+
+      const resolveBase = basePath ?? projectPath ?? process.cwd();
+      const resolvedPath = resolve(resolveBase, trimmedDir);
+      if (!existsSync(resolvedPath)) {
+        logger.step("validation-service", `Project creation rejected: working directory does not exist: ${resolvedPath}`);
+        return issueResult(
+          "invalid_input",
+          `Working directory does not exist: ${trimmedDir}`,
+          ["Provide a path to an existing directory on the server."],
+          { field: "workingDirectory", resolvedPath }
+        );
+      }
+      const stat = statSync(resolvedPath);
+      if (!stat.isDirectory()) {
+        logger.step("validation-service", `Project creation rejected: path is not a directory: ${resolvedPath}`);
+        return issueResult(
+          "invalid_input",
+          `Working directory is not a directory: ${trimmedDir}`,
+          ["Provide a path to an existing directory on the server."],
+          { field: "workingDirectory", resolvedPath }
+        );
+      }
+
+      return okResult("Project input is valid.", { input: { ...input, description: trimmedDesc, workingDirectory: resolvedPath } });
+    },
     async ensureProject(projectRef) {
       const project = await store.getProject(projectRef);
       if (project) {

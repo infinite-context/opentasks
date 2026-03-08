@@ -50,11 +50,11 @@ function renderFilterChip(filter: TaskFilter, label: string, activeFilter: TaskF
   `;
 }
 
-function renderTaskRow(task: TaskRecord, isSelected: boolean): string {
+export function renderTaskRow(task: TaskRecord, isSelected: boolean): string {
   return `
     <div class="task-row ${isSelected ? "task-row--selected" : ""}" data-task-id="${escapeHtml(task.id)}" role="listitem" tabindex="0">
       <div class="task-row__header">
-        <div class="task-row__id">${escapeHtml(task.id)}</div>
+        <div class="task-row__id">${escapeHtml(task.id)} in <span class="goal-link" data-goal-link data-goal-id="${escapeHtml(task.goalId)}" role="button" tabindex="0">${escapeHtml(task.goalId)}</span></div>
         <span class="status-pill status-pill--compact status-pill--${task.status}">${escapeHtml(formatStatus(task.status))}</span>
       </div>
       <div class="task-row__title-row">

@@ -48,6 +48,8 @@ const project: ProjectRecord = {
   id: "demo-project",
   key: "demo-project",
   name: "Demo Project",
+  description: "Demo project for testing",
+  workingDirectory: ".",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z"
 };
@@ -66,6 +68,9 @@ const goal: GoalRecord = {
 };
 
 const validationService: ValidationService = {
+  async validateCreateProjectInput(): Promise<OperationResultDto> {
+    throw new Error("not used");
+  },
   async ensureProjectGoals(): Promise<OperationResultDto> {
     return {
       status: "ok",
