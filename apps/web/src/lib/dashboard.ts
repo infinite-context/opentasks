@@ -1,4 +1,4 @@
-import type { TaskRecord } from "@opentasks/contracts";
+import type { CreateProjectInput, TaskRecord } from "@opentasks/contracts";
 import type { TaskFilter } from "../types";
 import { buildApiUrl } from "../utils";
 
@@ -28,6 +28,30 @@ export function pickSelectedTaskId(tasks: TaskRecord[], currentTaskId: string): 
 
 export function buildMetaUrl(): string {
   return buildApiUrl("/api/meta");
+}
+
+export function buildValidatePathUrl(path: string): string {
+  return buildApiUrl("/api/validate-path", { path });
+}
+
+export function buildFsEntriesUrl(path?: string): string {
+  return buildApiUrl("/api/fs/entries", { path: path ?? "." });
+}
+
+export function buildPickFolderUrl(): string {
+  return buildApiUrl("/api/fs/pick-folder");
+}
+
+export function buildProjectListUrl(limit?: number): string {
+  return buildApiUrl("/api/projects", limit ? { limit: String(limit) } : undefined);
+}
+
+export function buildProjectCreateUrl(): string {
+  return buildApiUrl("/api/projects");
+}
+
+export function buildGoalListUrl(projectId: string): string {
+  return buildApiUrl("/api/goals", { projectId });
 }
 
 export function buildDashboardApiUrl(projectId: string): string {
@@ -66,4 +90,22 @@ export function taskFilterToStatusParams(filter: TaskFilter): string[] | undefin
   if (filter === "blocked") return ["blocked"];
   if (filter === "in_progress") return ["assigned", "in_progress"];
   return undefined;
+}
+
+export function normalizeProjectKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export async function createProjectRequest(input: CreateProjectInput): Promise<Response> {
+  return fetch(buildProjectCreateUrl(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
 }

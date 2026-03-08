@@ -1,6 +1,8 @@
 import type {
   ClaimedTask,
+  GoalRecord,
   MemoryArtifact,
+  OperationStatus,
   ProjectRecord,
   TaskEvent,
   TaskOutcome,
@@ -10,10 +12,45 @@ import type {
 
 export interface CreateTaskInput {
   projectId: string;
+  goalId: string;
   title: string;
   description?: string;
   priority?: TaskRecord["priority"];
   dependencyIds?: string[];
+}
+
+export interface CreateProjectInput {
+  key: string;
+  name: string;
+  description: string;
+  workingDirectory: string;
+}
+
+export interface ProjectListQuery {
+  limit?: number;
+}
+
+export interface CreateGoalInput {
+  projectId: string;
+  key: string;
+  name: string;
+  description?: string;
+  priority?: TaskRecord["priority"];
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateGoalInput {
+  goalId: string;
+  projectId?: string;
+  name?: string;
+  description?: string;
+  status?: GoalRecord["status"];
+  priority?: GoalRecord["priority"];
+  metadata?: Record<string, unknown>;
+}
+
+export interface GoalListQuery {
+  projectId: string;
 }
 
 export interface TaskRequest {
@@ -32,6 +69,7 @@ export interface TaskClaimOptions {
 
 export interface TaskQueryFilters {
   projectId?: string;
+  goalId?: string;
   status?: TaskRecord["status"][];
   assignedTo?: string;
   limit?: number;
@@ -87,6 +125,14 @@ export interface ModelResponse {
 export interface TaskDetailDto {
   task: TaskRecord | ClaimedTask | null;
   events: TaskEvent[];
+}
+
+export interface ProjectListDto {
+  projects: ProjectRecord[];
+}
+
+export interface GoalListDto {
+  goals: GoalRecord[];
 }
 
 export interface TaskListDto {
@@ -153,4 +199,23 @@ export interface DashboardSnapshotDto {
 export interface DashboardStreamEventDto {
   type: "dashboard.snapshot";
   data: DashboardSnapshotDto;
+}
+
+export interface OperationContextDto {
+  project?: ProjectRecord | null;
+  projects?: ProjectRecord[];
+  goal?: GoalRecord | null;
+  goals?: GoalRecord[];
+  task?: TaskRecord | ClaimedTask | null;
+  events?: TaskEvent[];
+  input?: CreateProjectInput;
+  field?: string;
+  resolvedPath?: string;
+}
+
+export interface OperationResultDto {
+  status: OperationStatus;
+  message: string;
+  guidance: string[];
+  context?: OperationContextDto;
 }

@@ -1,5 +1,5 @@
 import type { Logger } from "../../infra/logging";
-import type { TaskStore } from "../../infra/storage/task-store";
+import type { CoordinationStore } from "../../infra/storage/task-store";
 import type {
   DashboardActivityItemDto,
   DashboardAgentStatusDto,
@@ -13,7 +13,7 @@ import type { DashboardQueryService } from "./types";
 
 interface CreateDashboardQueryServiceParams {
   logger: Logger;
-  taskStore: TaskStore;
+  taskStore: CoordinationStore;
 }
 
 const PIPELINE_STATUSES: TaskStatus[] = [

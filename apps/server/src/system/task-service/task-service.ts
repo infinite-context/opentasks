@@ -1,70 +1,172 @@
 import type { Logger } from "../../infra/logging";
 import type { TaskStore } from "../../infra/storage/task-store";
 import type {
-  ClaimedTask,
   CreateTaskInput,
+  OperationResultDto,
   TaskCompletion,
-  TaskEvent,
   TaskFailure,
-  TaskRecord,
-  TaskRelease,
-  TaskRequest
+  TaskRelease
 } from "@opentasks/contracts";
+import { issueResult, okResult } from "../service-result";
+import type { ValidationService } from "../validation-service";
 
 export interface TaskService {
-  createTask(input: CreateTaskInput): Promise<TaskRecord | null>;
-  requestTask(request: TaskRequest): Promise<ClaimedTask | null>;
-  startTask(taskId: string, agentName: string): Promise<TaskRecord | null>;
-  completeTask(taskId: string, agentName: string, completion: TaskCompletion): Promise<TaskRecord | null>;
-  failTask(taskId: string, agentName: string, failure: TaskFailure): Promise<TaskRecord | null>;
-  releaseTask(taskId: string, agentName: string, release: TaskRelease): Promise<TaskRecord | null>;
-  renewTaskLease(taskId: string, agentName: string, leaseDurationSeconds: number): Promise<TaskRecord | null>;
-  getTask(taskId: string): Promise<TaskRecord | null>;
-  listTaskEvents(taskId: string): Promise<TaskEvent[]>;
+  createTask(input: CreateTaskInput): Promise<OperationResultDto>;
+  startTask(taskId: string, agentName: string): Promise<OperationResultDto>;
+  completeTask(taskId: string, agentName: string, completion: TaskCompletion): Promise<OperationResultDto>;
+  failTask(taskId: string, agentName: string, failure: TaskFailure): Promise<OperationResultDto>;
+  releaseTask(taskId: string, agentName: string, release: TaskRelease): Promise<OperationResultDto>;
+  renewTaskLease(taskId: string, agentName: string, leaseDurationSeconds: number): Promise<OperationResultDto>;
+  getTask(taskId: string): Promise<OperationResultDto>;
 }
 
 interface CreateTaskServiceParams {
   logger: Logger;
   taskStore: TaskStore;
+  validationService: ValidationService;
   defaultLeaseDurationSeconds: number;
 }
 
 export function createTaskService({
   logger,
   taskStore,
+  validationService,
   defaultLeaseDurationSeconds
 }: CreateTaskServiceParams): TaskService {
   return {
-    async createTask(input: CreateTaskInput) {
-      return taskStore.createTask(input);
-    },
-    async requestTask(request: TaskRequest) {
-      return taskStore.claimNextTask(request.projectId, request.agentName, {
-        capabilities: request.capabilities,
-        taskHint: request.taskHint,
-        leaseDurationSeconds: defaultLeaseDurationSeconds
+    async createTask(input: CreateTaskInput): Promise<OperationResultDto> {
+      logger.step("task-service", `Creating task "${input.title}" in goal "${input.goalId}".`);
+      const goalValidation = await validationService.ensureGoalInProject(input.projectId, input.goalId);
+      if (goalValidation.status !== "ok") {
+        return goalValidation;
+      }
+
+      const task = await taskStore.createTask(input);
+      if (!task) {
+        return issueResult(
+          "goal_not_found",
+          `Task "${input.title}" could not be created because the goal or project context is invalid.`,
+          ["Verify the project and goal pair, then retry create_task."]
+        );
+      }
+
+      return okResult(`Created task ${task.id}: "${task.title}".`, {
+        project: goalValidation.context?.project,
+        goal: goalValidation.context?.goal,
+        task
       });
     },
-    async startTask(taskId: string, agentName: string) {
-      return taskStore.markTaskInProgress(taskId, agentName);
+    async startTask(taskId: string, agentName: string): Promise<OperationResultDto> {
+      logger.step("task-service", `Starting task "${taskId}".`);
+      const validationResult = await validationService.ensureTask(taskId);
+      if (validationResult.status !== "ok") {
+        return validationResult;
+      }
+
+      const task = await taskStore.markTaskInProgress(taskId, agentName);
+      if (!task) {
+        return issueResult(
+          "invalid_transition",
+          `Task ${taskId} could not be started.`,
+          ["Make sure the task is assigned to the requesting agent before calling start_task."],
+          validationResult.context
+        );
+      }
+
+      return okResult(`Task ${task.id} is now in progress.`, { task });
     },
-    async completeTask(taskId: string, agentName: string, completion: TaskCompletion) {
-      return taskStore.completeTask(taskId, agentName, completion);
+    async completeTask(taskId: string, agentName: string, completion: TaskCompletion): Promise<OperationResultDto> {
+      logger.step("task-service", `Completing task "${taskId}".`);
+      const validationResult = await validationService.ensureTask(taskId);
+      if (validationResult.status !== "ok") {
+        return validationResult;
+      }
+
+      const task = await taskStore.completeTask(taskId, agentName, completion);
+      if (!task) {
+        return issueResult(
+          "invalid_transition",
+          `Task ${taskId} could not be completed.`,
+          ["Make sure the task is assigned to the requesting agent before calling complete_task."],
+          validationResult.context
+        );
+      }
+
+      return okResult(`Task ${task.id} completed.`, { task });
     },
-    async failTask(taskId: string, agentName: string, failure: TaskFailure) {
-      return taskStore.failTask(taskId, agentName, failure);
+    async failTask(taskId: string, agentName: string, failure: TaskFailure): Promise<OperationResultDto> {
+      logger.step("task-service", `Failing task "${taskId}".`);
+      const validationResult = await validationService.ensureTask(taskId);
+      if (validationResult.status !== "ok") {
+        return validationResult;
+      }
+
+      const task = await taskStore.failTask(taskId, agentName, failure);
+      if (!task) {
+        return issueResult(
+          "invalid_transition",
+          `Task ${taskId} could not be marked as failed.`,
+          ["Make sure the task is assigned to the requesting agent before calling fail_task."],
+          validationResult.context
+        );
+      }
+
+      return okResult(`Task ${task.id} marked as failed.`, { task });
     },
-    async releaseTask(taskId: string, agentName: string, release: TaskRelease) {
-      return taskStore.releaseTask(taskId, agentName, release);
+    async releaseTask(taskId: string, agentName: string, release: TaskRelease): Promise<OperationResultDto> {
+      logger.step("task-service", `Releasing task "${taskId}".`);
+      const validationResult = await validationService.ensureTask(taskId);
+      if (validationResult.status !== "ok") {
+        return validationResult;
+      }
+
+      const task = await taskStore.releaseTask(taskId, agentName, release);
+      if (!task) {
+        return issueResult(
+          "invalid_transition",
+          `Task ${taskId} could not be released.`,
+          ["Make sure the task is assigned to the requesting agent before calling release_task."],
+          validationResult.context
+        );
+      }
+
+      return okResult(`Task ${task.id} released back to the queue.`, { task });
     },
-    async renewTaskLease(taskId: string, agentName: string, leaseDurationSeconds: number) {
-      return taskStore.renewTaskLease(taskId, agentName, leaseDurationSeconds);
+    async renewTaskLease(taskId: string, agentName: string, leaseDurationSeconds: number): Promise<OperationResultDto> {
+      logger.step("task-service", `Renewing lease for task "${taskId}".`);
+      const validationResult = await validationService.ensureTask(taskId);
+      if (validationResult.status !== "ok") {
+        return validationResult;
+      }
+
+      const task = await taskStore.renewTaskLease(
+        taskId,
+        agentName,
+        leaseDurationSeconds > 0 ? leaseDurationSeconds : defaultLeaseDurationSeconds
+      );
+      if (!task) {
+        return issueResult(
+          "invalid_transition",
+          `Task ${taskId} lease could not be renewed.`,
+          ["Make sure the task is assigned to the requesting agent before calling heartbeat_task."],
+          validationResult.context
+        );
+      }
+
+      return okResult(`Lease renewed for task ${task.id}.`, { task });
     },
-    async getTask(taskId: string) {
-      return taskStore.getTaskById(taskId);
-    },
-    async listTaskEvents(taskId: string) {
-      return taskStore.listTaskEvents(taskId);
+    async getTask(taskId: string): Promise<OperationResultDto> {
+      logger.step("task-service", `Loading task "${taskId}".`);
+      const validationResult = await validationService.ensureTask(taskId);
+      if (validationResult.status !== "ok") {
+        return validationResult;
+      }
+
+      const events = await taskStore.listTaskEvents(taskId);
+      return okResult(`Loaded task ${taskId} with ${events.length} lifecycle event(s).`, {
+        task: validationResult.context?.task ?? null,
+        events
+      });
     }
   };
 }

@@ -5,7 +5,10 @@ export type TaskFilter = "all" | "blocked" | "in_progress";
 export type ConnectionState = "connecting" | "connected" | "disconnected";
 
 export type ViewId =
+  | "project"
+  | "projects"
   | "dashboard"
+  | "goals"
   | "tasks"
   | "agents"
   | "analytics"

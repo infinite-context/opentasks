@@ -1,13 +1,23 @@
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { relative, resolve } from "node:path";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+import os from "node:os";
 import fastify from "fastify";
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from "fastify-type-provider-zod";
 import { FastifySSEPlugin } from "fastify-sse-v2";
 import {
+  createProjectInputSchema,
   dashboardQuerySchema,
   dashboardStreamEventDtoSchema,
+  goalListQuerySchema,
+  projectListQuerySchema,
   taskListQuerySchema
 } from "@opentasks/contracts/schemas";
 import type { Logger } from "../../infra/logging";
 import type { DashboardQueryService } from "../../system/dashboard-query-service";
+import type { GoalService } from "../../system/goal-service";
+import type { ProjectService } from "../../system/project-service";
 import type { TaskQueryService } from "../../system/task-query-service";
 import type { HttpTransport } from "./types";
 
@@ -17,8 +27,35 @@ interface CreateHttpTransportParams {
   appVersion: string;
   projectPath: string;
   port: number;
+  projectService: ProjectService;
+  goalService: GoalService;
   dashboardQueryService: DashboardQueryService;
   taskQueryService: TaskQueryService;
+}
+
+const execAsync = promisify(exec);
+
+async function showFolderPicker(): Promise<string | null> {
+  try {
+    const platform = os.platform();
+    if (platform === "win32") {
+      const script = `Add-Type -AssemblyName System.Windows.Forms; $fbd = New-Object System.Windows.Forms.FolderBrowserDialog; $fbd.ShowNewFolderButton = $true; if ($fbd.ShowDialog() -eq 'OK') { Write-Output $fbd.SelectedPath }`;
+      const { stdout } = await execAsync(`powershell -NoProfile -STA -Command "${script}"`);
+      const path = stdout.trim();
+      return path || null;
+    } else if (platform === "darwin") {
+      const { stdout } = await execAsync(`osascript -e 'tell application "System Events" to activate' -e 'tell application "System Events" to return POSIX path of (choose folder)'`);
+      const path = stdout.trim();
+      return path || null;
+    } else if (platform === "linux") {
+      const { stdout } = await execAsync(`zenity --file-selection --directory`);
+      const path = stdout.trim();
+      return path || null;
+    }
+    return null;
+  } catch (error) {
+    return null;
+  }
 }
 
 export function createHttpTransport({
@@ -27,6 +64,8 @@ export function createHttpTransport({
   appVersion,
   projectPath,
   port,
+  projectService,
+  goalService,
   dashboardQueryService,
   taskQueryService
 }: CreateHttpTransportParams): HttpTransport {
@@ -42,12 +81,45 @@ export function createHttpTransport({
 
   server.addHook("onRequest", async (request, reply) => {
     reply.header("Access-Control-Allow-Origin", "*");
-    reply.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    reply.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     reply.header("Access-Control-Allow-Headers", "Content-Type");
   });
 
   server.options("*", async (request, reply) => {
     return reply.status(204).send();
+  });
+
+  server.get("/api/projects", {
+    schema: {
+      querystring: projectListQuerySchema
+    }
+  }, async (request, reply) => {
+    const result = await projectService.listProjects(request.query.limit);
+    return reply.status(200).send(result);
+  });
+
+  server.post("/api/projects", {
+    schema: {
+      body: createProjectInputSchema
+    }
+  }, async (request, reply) => {
+    const result = await projectService.createProject(request.body);
+    const project = result.context?.project;
+
+    if (!project) {
+      return reply.status(400).send(result);
+    }
+
+    return reply.status(201).send(project);
+  });
+
+  server.get("/api/goals", {
+    schema: {
+      querystring: goalListQuerySchema
+    }
+  }, async (request, reply) => {
+    const result = await goalService.listGoals(request.query.projectId);
+    return reply.status(200).send(result);
   });
 
   server.get("/api/dashboard", {
@@ -117,6 +189,65 @@ export function createHttpTransport({
       version: appVersion,
       projectPath: normalizedPath
     });
+  });
+
+  server.get("/api/validate-path", {
+    schema: {
+      querystring: { path: { type: "string" } }
+    }
+  }, async (request, reply) => {
+    const { path: rawPath } = request.query as { path: string };
+    const trimmed = rawPath?.trim() ?? "";
+    if (!trimmed) {
+      return reply.status(200).send({ valid: false, error: "Path is required." });
+    }
+    const resolved = resolve(projectPath, trimmed);
+    if (!existsSync(resolved)) {
+      return reply.status(200).send({ valid: false, error: "Path does not exist." });
+    }
+    const stat = statSync(resolved);
+    const valid = stat.isDirectory();
+    return reply.status(200).send({
+      valid,
+      resolved: valid ? resolved : undefined,
+      error: valid ? undefined : "Path is not a directory."
+    });
+  });
+
+  server.get("/api/fs/entries", {
+    schema: {
+      querystring: { path: { type: "string", default: "." } }
+    }
+  }, async (request, reply) => {
+    const { path: rawPath } = request.query as { path: string };
+    const trimmed = (rawPath ?? ".").trim() || ".";
+    const resolved = resolve(projectPath, trimmed);
+    const rel = relative(projectPath, resolved);
+    if (rel.startsWith("..") || (process.platform === "win32" && /^[a-zA-Z]:/.test(rel))) {
+      return reply.status(400).send({ error: "Path is outside project directory." });
+    }
+    try {
+      const entries = readdirSync(resolved, { withFileTypes: true })
+        .filter((e) => e.name !== "." && e.name !== "..")
+        .map((e) => ({ name: e.name, isDirectory: e.isDirectory() }))
+        .sort((a, b) => {
+          if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+      return reply.status(200).send({ path: trimmed, resolvedPath: resolved, entries });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to read directory.";
+      return reply.status(400).send({ error: message });
+    }
+  });
+
+  server.get("/api/fs/pick-folder", async (request, reply) => {
+    try {
+      const path = await showFolderPicker();
+      return reply.status(200).send({ path });
+    } catch (error) {
+      return reply.status(500).send({ error: "Failed to open folder picker" });
+    }
   });
 
   server.setErrorHandler((error: any, request, reply) => {

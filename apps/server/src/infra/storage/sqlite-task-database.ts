@@ -1,6 +1,9 @@
 import type { Logger } from "../logging";
 import type {
   ClaimedTask,
+  CreateGoalInput,
+  CreateProjectInput,
+  GoalRecord,
   ProjectRecord,
   TaskEvent,
   TaskEventActorType,
@@ -16,13 +19,14 @@ import type {
   TaskCompletion,
   TaskFailure,
   TaskQueryFilters,
-  TaskRelease
+  TaskRelease,
+  UpdateGoalInput
 } from "@opentasks/contracts";
-import type { TaskStore } from "./task-store";
+import type { CoordinationStore } from "./task-store";
 import type { Database } from "better-sqlite3";
 import { generateId } from "./sqlite-schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { eq, or, and, isNull, lte, notExists, asc, desc, inArray, sql } from "drizzle-orm";
+import { eq, or, and, lte, asc, desc, inArray, sql } from "drizzle-orm";
 import * as schema from "./schema";
 
 interface CreateSqliteTaskDatabaseParams {
@@ -33,10 +37,123 @@ interface CreateSqliteTaskDatabaseParams {
 export function createSqliteTaskDatabase({
   logger,
   db: sqliteDb
-}: CreateSqliteTaskDatabaseParams): TaskStore {
+}: CreateSqliteTaskDatabaseParams): CoordinationStore {
   const db = drizzle(sqliteDb, { schema });
 
   return {
+    async createProject(input: CreateProjectInput): Promise<ProjectRecord> {
+      const existing = getProjectByIdOrKeyFromDb(db, input.key);
+      if (existing) {
+        return existing;
+      }
+
+      const projectId = generateId("project");
+      db.insert(schema.projects).values({
+        id: projectId,
+        key: input.key,
+        name: input.name,
+        description: input.description,
+        workingDirectory: input.workingDirectory
+      }).run();
+
+      return getProjectByIdOrKeyFromDb(db, projectId)!;
+    },
+    async getProject(projectId: string): Promise<ProjectRecord | null> {
+      return getProjectByIdOrKeyFromDb(db, projectId);
+    },
+    async listProjects(limit = 100): Promise<ProjectRecord[]> {
+      return db.select()
+        .from(schema.projects)
+        .orderBy(asc(schema.projects.createdAt))
+        .limit(limit)
+        .all()
+        .map(mapProjectRow);
+    },
+    async createGoal(input: CreateGoalInput): Promise<GoalRecord | null> {
+      return sqliteDb.transaction(() => {
+        const project = getProjectByIdOrKeyFromDb(db, input.projectId);
+        if (!project) {
+          return null;
+        }
+
+        const existing = getGoalByProjectAndKeyFromDb(db, project.id, input.key);
+        if (existing) {
+          return existing;
+        }
+
+        const goalId = generateId("goal");
+        db.insert(schema.goals).values({
+          id: goalId,
+          projectId: project.id,
+          key: input.key,
+          name: input.name,
+          description: input.description ?? "",
+          status: "active",
+          priority: input.priority ?? "P2",
+          metadataJson: JSON.stringify(input.metadata ?? {})
+        }).run();
+
+        return getGoalByIdFromDb(db, goalId);
+      })();
+    },
+    async updateGoal(input: UpdateGoalInput): Promise<GoalRecord | null> {
+      return sqliteDb.transaction(() => {
+        const goal = getGoalByIdFromDb(db, input.goalId);
+        if (!goal) {
+          return null;
+        }
+
+        if (input.projectId) {
+          const projectId = resolveProjectIdFromDb(db, input.projectId);
+          if (!projectId || projectId !== goal.projectId) {
+            return null;
+          }
+        }
+
+        const values: Partial<typeof schema.goals.$inferInsert> = {
+          updatedAt: sql`datetime('now')` as unknown as string
+        };
+
+        if (input.name !== undefined) {
+          values.name = input.name;
+        }
+        if (input.description !== undefined) {
+          values.description = input.description;
+        }
+        if (input.status !== undefined) {
+          values.status = input.status;
+        }
+        if (input.priority !== undefined) {
+          values.priority = input.priority;
+        }
+        if (input.metadata !== undefined) {
+          values.metadataJson = JSON.stringify(input.metadata);
+        }
+
+        db.update(schema.goals)
+          .set(values)
+          .where(eq(schema.goals.id, input.goalId))
+          .run();
+
+        return getGoalByIdFromDb(db, input.goalId);
+      })();
+    },
+    async getGoal(goalId: string): Promise<GoalRecord | null> {
+      return getGoalByIdFromDb(db, goalId);
+    },
+    async listGoals(projectId: string): Promise<GoalRecord[]> {
+      const resolvedProjectId = resolveProjectIdFromDb(db, projectId);
+      if (!resolvedProjectId) {
+        return [];
+      }
+
+      return db.select()
+        .from(schema.goals)
+        .where(eq(schema.goals.projectId, resolvedProjectId))
+        .orderBy(ascGoalPrioritySql(schema.goals.priority), asc(schema.goals.createdAt))
+        .all()
+        .map(mapGoalRow);
+    },
     async createTask(input: CreateTaskInput): Promise<TaskRecord | null> {
       return sqliteDb.transaction(() => {
         const project = getProjectByIdOrKeyFromDb(db, input.projectId);
@@ -48,11 +165,21 @@ export function createSqliteTaskDatabase({
           return null;
         }
 
+        const goal = getGoalByIdFromDb(db, input.goalId);
+        if (!goal || goal.projectId !== project.id) {
+          logger.step(
+            "storage:sqlite-task-db",
+            `Cannot create task: goal "${input.goalId}" not found in project "${project.id}".`
+          );
+          return null;
+        }
+
         const taskId = generateId("task");
 
         db.insert(schema.tasks).values({
           id: taskId,
           projectId: project.id,
+          goalId: goal.id,
           title: input.title,
           description: input.description ?? "",
           status: 'available',
@@ -89,7 +216,7 @@ export function createSqliteTaskDatabase({
 
         logger.step(
           "storage:sqlite-task-db",
-          `Created task "${taskId}" in project "${input.projectId}".`
+          `Created task "${taskId}" in goal "${goal.id}".`
         );
 
         return getTaskByIdFromDb(db, taskId);
@@ -97,12 +224,13 @@ export function createSqliteTaskDatabase({
     },
     async claimNextTask(
       projectId: string,
+      goalId: string,
       agentName: string,
       options: TaskClaimOptions
     ): Promise<ClaimedTask | null> {
       logger.step(
         "storage:sqlite-task-db",
-        `SQLite task store looks for the next available task in project "${projectId}".`
+        `SQLite task store looks for the next available task in goal "${goalId}".`
       );
 
       return sqliteDb.transaction(() => {
@@ -111,12 +239,18 @@ export function createSqliteTaskDatabase({
           return null;
         }
 
-        requeueExpiredTasksInTransaction(db, resolvedProjectId);
+        const goal = getGoalByIdFromDb(db, goalId);
+        if (!goal || goal.projectId !== resolvedProjectId || goal.status !== "active") {
+          return null;
+        }
+
+        requeueExpiredTasksInTransaction(db, resolvedProjectId, goal.id);
 
         const candidateRaw = sqliteDb.prepare(`
           SELECT t.id
           FROM tasks t
           WHERE t.project_id = ?
+            AND t.goal_id = ?
             AND t.status = 'available'
             AND (t.available_at IS NULL OR t.available_at <= datetime('now'))
             AND NOT EXISTS (
@@ -136,7 +270,7 @@ export function createSqliteTaskDatabase({
             t.available_at ASC,
             t.created_at ASC
           LIMIT 1
-        `).get(resolvedProjectId) as { id: string } | undefined;
+        `).get(resolvedProjectId, goal.id) as { id: string } | undefined;
 
         if (!candidateRaw) {
           return null;
@@ -171,9 +305,6 @@ export function createSqliteTaskDatabase({
         return getTaskByIdFromDb(db, candidateRaw.id) as ClaimedTask | null;
       })();
     },
-    async getProject(projectId: string): Promise<ProjectRecord | null> {
-      return getProjectByIdOrKeyFromDb(db, projectId);
-    },
     async getTaskById(taskId: string): Promise<TaskRecord | null> {
       return getTaskByIdFromDb(db, taskId);
     },
@@ -184,6 +315,10 @@ export function createSqliteTaskDatabase({
       if (filters?.projectId) {
         if (!projectId) return [];
         conditions.push(eq(schema.tasks.projectId, projectId));
+      }
+
+      if (filters?.goalId) {
+        conditions.push(eq(schema.tasks.goalId, filters.goalId));
       }
 
       if (filters?.assignedTo) {
@@ -399,10 +534,10 @@ export function createSqliteTaskDatabase({
         return getTaskByIdFromDb(db, taskId);
       })();
     },
-    async requeueExpiredTasks(projectId?: string): Promise<number> {
+    async requeueExpiredTasks(projectId?: string, goalId?: string): Promise<number> {
       return sqliteDb.transaction(() => {
         const resolvedProjectId = projectId ? resolveProjectIdFromDb(db, projectId) : undefined;
-        return requeueExpiredTasksInTransaction(db, resolvedProjectId ?? undefined);
+        return requeueExpiredTasksInTransaction(db, resolvedProjectId ?? undefined, goalId);
       })();
     },
     async listTaskEvents(taskId: string): Promise<TaskEvent[]> {
@@ -460,6 +595,26 @@ function getTaskByIdFromDb(db: any, taskId: string): TaskRecord | null {
   return row ? mapTaskRow(row.task, row.dependencyIds) : null;
 }
 
+function getGoalByIdFromDb(db: any, goalId: string): GoalRecord | null {
+  const row = db.select()
+    .from(schema.goals)
+    .where(eq(schema.goals.id, goalId))
+    .limit(1)
+    .get();
+
+  return row ? mapGoalRow(row) : null;
+}
+
+function getGoalByProjectAndKeyFromDb(db: any, projectId: string, goalKey: string): GoalRecord | null {
+  const row = db.select()
+    .from(schema.goals)
+    .where(and(eq(schema.goals.projectId, projectId), eq(schema.goals.key, goalKey)))
+    .limit(1)
+    .get();
+
+  return row ? mapGoalRow(row) : null;
+}
+
 function resolveProjectIdFromDb(db: any, projectRef: string): string | null {
   const project = getProjectByIdOrKeyFromDb(db, projectRef);
   return project?.id ?? null;
@@ -474,10 +629,31 @@ function getProjectByIdOrKeyFromDb(db: any, projectRef: string): ProjectRecord |
 
   if (!row) return null;
 
+  return mapProjectRow(row);
+}
+
+function mapProjectRow(row: any): ProjectRecord {
   return {
     id: row.id,
     key: row.key,
     name: row.name,
+    description: row.description ?? "",
+    workingDirectory: row.workingDirectory ?? "",
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function mapGoalRow(row: any): GoalRecord {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    key: row.key,
+    name: row.name,
+    description: row.description,
+    status: row.status,
+    priority: row.priority,
+    metadata: JSON.parse(row.metadataJson),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -489,6 +665,7 @@ function mapTaskRow(row: any, dependencyIdsJson: string): TaskRecord {
   return {
     id: row.id,
     projectId: row.projectId,
+    goalId: row.goalId,
     title: row.title,
     description: row.description,
     status: row.status as TaskStatus,
@@ -510,7 +687,7 @@ function mapTaskRow(row: any, dependencyIdsJson: string): TaskRecord {
   };
 }
 
-function requeueExpiredTasksInTransaction(db: any, projectId?: string): number {
+function requeueExpiredTasksInTransaction(db: any, projectId?: string, goalId?: string): number {
   const conditions = [
     inArray(schema.tasks.status, ['assigned', 'in_progress']),
     sql`${schema.tasks.leaseExpiresAt} IS NOT NULL`,
@@ -519,6 +696,10 @@ function requeueExpiredTasksInTransaction(db: any, projectId?: string): number {
 
   if (projectId) {
     conditions.push(eq(schema.tasks.projectId, projectId));
+  }
+
+  if (goalId) {
+    conditions.push(eq(schema.tasks.goalId, goalId));
   }
 
   const rows = db.update(schema.tasks)
@@ -547,6 +728,15 @@ function requeueExpiredTasksInTransaction(db: any, projectId?: string): number {
   }
 
   return rows.length;
+}
+
+function ascGoalPrioritySql(priorityColumn: typeof schema.goals.priority) {
+  return sql`CASE ${priorityColumn}
+    WHEN 'P0' THEN 0
+    WHEN 'P1' THEN 1
+    WHEN 'P2' THEN 2
+    ELSE 3
+  END`;
 }
 
 function insertTaskEvent(

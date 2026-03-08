@@ -1,24 +1,71 @@
 import type { NavItem, Theme, ViewId } from "../types";
 import { escapeHtml, renderIcon } from "../utils";
 
+interface SidebarProjectOption {
+  id: string;
+  label: string;
+}
+
 export function renderSidebar(
   activeTheme: Theme,
   currentView: ViewId,
-  focusMessage: string
+  focusMessage: string,
+  projectOptions: SidebarProjectOption[],
+  selectedProjectId: string,
+  isProjectMenuOpen: boolean
 ): string {
+  const selectedProject =
+    projectOptions.find((project) => project.id === selectedProjectId) ?? projectOptions[0] ?? null;
+
   return `
     <aside class="sidebar">
       <div class="sidebar__brand">
-        <div class="sidebar__logo">${renderIcon("fa-solid fa-brain")}</div>
-        <div>
-          <div class="eyebrow">Workspace</div>
-          <div class="sidebar__title">OpenTasks</div>
+        <div class="sidebar__project-picker">
+          <span class="eyebrow">Project</span>
+          <div class="sidebar__project-menu">
+            <button
+              aria-expanded="${isProjectMenuOpen ? "true" : "false"}"
+              class="sidebar__project-trigger"
+              data-project-menu-toggle
+              type="button"
+            >
+              <span class="sidebar__project-trigger-label">${escapeHtml(selectedProject?.label ?? "Select project")}</span>
+              <span class="sidebar__project-trigger-icon">${renderIcon("fa-solid fa-chevron-down")}</span>
+            </button>
+            <div class="sidebar__project-dropdown ${isProjectMenuOpen ? "sidebar__project-dropdown--open" : ""}">
+              <div class="sidebar__project-list">
+                ${projectOptions
+                  .map(
+                    (project) => `
+                      <button
+                        class="sidebar__project-option ${project.id === selectedProjectId ? "sidebar__project-option--active" : ""}"
+                        data-project-option="${escapeHtml(project.id)}"
+                        type="button"
+                      >
+                        ${escapeHtml(project.label)}
+                      </button>
+                    `
+                  )
+                  .join("")}
+              </div>
+              <div class="sidebar__project-dropdown-footer">
+                <button class="sidebar__project-new" data-project-new type="button">
+                  <span class="button__content">
+                    ${renderIcon("fa-solid fa-plus")}
+                    <span>New project</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       <nav class="nav">
         ${renderNavSection("Overview", [
           { id: "dashboard", label: "Dashboard", icon: "fa-solid fa-table-columns" },
+          { id: "project", label: "Project", icon: "fa-solid fa-folder-tree" },
+          { id: "goals", label: "Goals", icon: "fa-solid fa-bullseye" },
           { id: "tasks", label: "Tasks", icon: "fa-solid fa-list-check" },
           { id: "agents", label: "Agents", icon: "fa-solid fa-wrench" },
           { id: "analytics", label: "Analytics", icon: "fa-solid fa-chart-line" },

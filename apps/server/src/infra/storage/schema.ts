@@ -5,13 +5,34 @@ export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
   key: text("key").notNull().unique(),
   name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  workingDirectory: text("working_directory").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+});
+
+export const goals = sqliteTable("goals", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  status: text("status", { enum: ["active", "paused", "completed", "cancelled"] }).notNull(),
+  priority: text("priority", { enum: ["P0", "P1", "P2", "P3"] }).notNull(),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => {
+  return {
+    projectKeyUniqueIdx: index("idx_goals_project_key").on(table.projectId, table.key),
+    projectStatusPriorityIdx: index("idx_goals_project_status_priority").on(table.projectId, table.status, table.priority),
+  };
 });
 
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  goalId: text("goal_id").references(() => goals.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
   status: text("status", { enum: ['pending', 'available', 'assigned', 'in_progress', 'blocked', 'completed', 'failed', 'cancelled'] }).notNull(),
@@ -32,6 +53,7 @@ export const tasks = sqliteTable("tasks", {
 }, (table) => {
   return {
     projectStatusAvailableIdx: index("idx_tasks_project_status_available").on(table.projectId, table.status, table.availableAt),
+    goalStatusAvailableIdx: index("idx_tasks_goal_status_available").on(table.goalId, table.status, table.availableAt),
     assignedStatusIdx: index("idx_tasks_assigned_status").on(table.assignedTo, table.status),
     leaseExpiresIdx: index("idx_tasks_lease_expires").on(table.leaseExpiresAt),
     updatedAtIdx: index("idx_tasks_updated_at").on(table.updatedAt),

@@ -26,7 +26,6 @@ The system is organized around three core layers that already exist in the codeb
 
 Supporting these layers are:
 
-- `shared`
 - `docs`
 - workspace-level app and package boundaries
 
@@ -44,7 +43,13 @@ The repository should continue to use a workspace-based layout:
         transport/
         system/
         infra/
-        shared/
+      package.json
+    web/
+      src/
+        components/
+        views/
+        lib/
+        utils/
       package.json
   docs/
     architecture.md
@@ -127,37 +132,6 @@ Not allowed:
 - owning end-to-end workflow decisions
 - embedding transport-specific behavior unless the component itself is a transport adapter
 
-### `shared`
-
-`shared` contains small, stable, cross-layer contracts used inside a single app.
-
-Allowed responsibilities:
-
-- core types
-- value objects
-- shared enums
-- small utility contracts
-
-Not allowed:
-
-- business workflows
-- infrastructure implementations
-- large utility dumping grounds
-
-If shared contracts need to be reused by multiple apps, promote them into `packages/contracts`.
-
-### Shared contract split
-
-Inside an app, `shared` should be split by responsibility rather than treated as a single contract file.
-
-Use:
-
-- `shared/primitives.ts` for structural base interfaces such as `IdentityModel` and `AuditableModel`
-- `shared/types.ts` for persisted or domain-facing entity/state contracts
-- `shared/dtos.ts` for transport-facing DTOs, command payloads, and non-persisted request/response contracts
-
-Rule: if a shape represents stored entity state, it belongs in `types.ts`. If a shape represents input/output across a boundary, it belongs in `dtos.ts`.
-
 ### Cross-app contract package
 
 When contracts are shared across the backend and frontend, `packages/contracts` becomes the canonical source of truth.
@@ -169,7 +143,7 @@ Use:
 - `packages/contracts/src/dtos.ts` for shared command, query, and aggregate response shapes
 - `packages/contracts/src/schemas.ts` for runtime validation schemas shared by transports
 
-Rule: `apps/server/src/shared/*` may exist as app-local facades or re-exports, but the authoritative cross-app definitions must live in `packages/contracts`.
+Rule: the authoritative cross-app definitions must live in `packages/contracts`.
 
 ## Dependency rules
 
@@ -178,18 +152,24 @@ Dependencies must move inward toward business logic through interfaces, not outw
 Allowed dependency direction inside an app:
 
 - `transport` -> `system`
-- `system` -> `shared`
 - `system` -> `infra` only through explicit interfaces or injected implementations
-- `infra` -> `shared`
+- `system` -> `@opentasks/contracts`
+- `infra` -> `@opentasks/contracts`
 
 Disallowed dependencies:
 
 - `system` importing transport adapters
-- `shared` importing from `transport`, `system`, or `infra`
 - `infra` calling into transport
 - sibling system modules reaching into each other's private files
 
 Rule: if a component needs an external capability, define a port/type for the dependency and inject the implementation.
+
+For the current coordination model, use explicit aggregate-facing ports where practical:
+
+- `ProjectStore`
+- `GoalStore`
+- `TaskStore`
+- combined composition types such as `CoordinationStore` only at the app wiring boundary
 
 ## Component design rules
 
@@ -249,7 +229,7 @@ If adding HTTP, queue consumers, CLI commands, or another protocol:
 For browser-facing transports specifically:
 
 - keep the browser on HTTP/SSE rather than direct MCP
-- expose aggregate read models that contain canonical entities rather than frontend-only copies
+- expose project-aware aggregate read models that contain canonical entities rather than frontend-only copies
 - validate request/query shapes with shared schemas from `packages/contracts`
 
 ### Add a new system capability
@@ -260,6 +240,14 @@ If adding a new workflow or business process:
 - keep it focused on one use case or one orchestration concern
 - inject dependencies rather than constructing infra internally
 - expose a minimal interface
+
+Current examples in the active runtime include:
+
+- `validation-service` for cross-aggregate checks
+- `project-service` for project creation and lookup
+- `goal-service` for goal mutation, listing, and orchestration support
+- `task-service` for task lifecycle transitions and task creation
+- `task-orchestrator` for `request_task`
 
 ### Add a new provider or storage implementation
 
@@ -349,8 +337,9 @@ Guidelines:
 - isolate migration or driver-specific code from orchestration code
 - use one adapter per responsibility where practical
 - let the database generate persisted identifiers on insert and hydrate the created model from the returned row
-- use prefixed object identifiers for persisted records, following the Stripe-style pattern such as `task_<id>` or `project_<id>`
+- use prefixed object identifiers for persisted records, following the Stripe-style pattern such as `project_<id>`, `goal_<id>`, `task_<id>`, or `task_event_<id>`
 - keep canonical persisted model definitions aligned with the database-backed source of truth before deriving browser aggregates from them
+- when evolving SQLite schemas, support live upgrades for existing local databases before adding indexes or queries that assume new columns already exist
 
 Examples:
 
@@ -367,6 +356,17 @@ All external model access must be routed through a provider abstraction.
 - downstream components depend on the service contract, not on a specific vendor
 
 Rule: prompt construction and model usage policy should live close to the use case that needs it, while HTTP/API details stay inside the provider adapter.
+
+The current phase does not activate:
+
+- `context-hydrator`
+- `vector-search-engine`
+- `vector-database`
+- `indexer`
+- `internal-agent`
+- `model-provider-service`
+
+These components may remain in the repo structurally, but they should not be wired into the active runtime until their phase begins.
 
 ## Observability rules
 
@@ -409,6 +409,7 @@ When adding or changing a major component:
 - update `docs/architecture.md` if the runtime flow changes
 - update `docs/agent_rules.md` if the structural rule set changes
 - add module-level README or doc comments only when the behavior is non-obvious
+- update browser-facing docs when navigation or read flows change materially, such as introducing project-aware selection and project-scoped dashboard views
 
 ## Change checklist
 
@@ -430,9 +431,10 @@ These rules should be treated as default architectural constraints:
 - **Use Fastify.** The backend HTTP server must use Fastify and `fastify-type-provider-zod` for routing and validation. Do not revert to raw `node:http` or introduce Express.
 - **Use Drizzle ORM.** The database layer must use Drizzle ORM for type-safe query building. Do not use raw SQL strings with `better-sqlite3`.
 - **Single Source of Truth for Contracts.** All types, interfaces, and Zod schemas must be imported directly from `@opentasks/contracts`. Do not create redundant `shared` directories in the server or web apps to re-export them.
+- **Keep MCP thin.** MCP handlers may validate shape, call services, and render standardized responses, but they must not own project, goal, task, or orchestration business rules.
+- **Keep validation centralized.** Cross-aggregate checks such as project existence, goal existence, ownership validation, and task-goal consistency belong in dedicated services rather than being duplicated across transports.
 - Do not place business logic in `transport`.
 - Do not let `infra` define workflow behavior.
-- Do not let `shared` become a catch-all folder.
 - Do not bypass public module boundaries.
 - Do not couple system logic directly to vendors.
 - Do not add new top-level folders without a clear architectural reason.

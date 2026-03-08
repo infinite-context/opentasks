@@ -1,8 +1,11 @@
 export { renderAgentsView } from "./AgentsView";
+export { renderProjectView } from "./ProjectView";
 export { renderAnalyticsView } from "./AnalyticsView";
 export { renderDashboardView } from "./DashboardView";
+export { renderGoalsView } from "./GoalsView";
 export { renderMcpView } from "./McpView";
 export { renderPlaceholderView } from "./PlaceholderView";
+export { renderProjectsView } from "./ProjectsView";
 export { renderSettingsView } from "./SettingsView";
 export { renderSystemHealthView } from "./SystemHealthView";
 export { renderTasksView } from "./TasksView";

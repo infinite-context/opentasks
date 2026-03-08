@@ -12,7 +12,7 @@ export function renderTaskDetailCard(
       <div class="card__header">
         <div>
           <div class="eyebrow">Selected task</div>
-          ${selectedTask ? `<div class="task-detail__id">${escapeHtml(selectedTask.id)}</div>` : ""}
+          ${selectedTask ? `<div class="task-detail__id">${escapeHtml(selectedTask.id)} in <span class="goal-link" data-goal-link data-goal-id="${escapeHtml(selectedTask.goalId)}" role="button" tabindex="0">${escapeHtml(selectedTask.goalId)}</span></div>` : ""}
           <h2>${escapeHtml(selectedTask?.title ?? "No task selected")}</h2>
         </div>
         ${

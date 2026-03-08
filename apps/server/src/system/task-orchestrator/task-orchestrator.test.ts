@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { createTaskOrchestrator } from "./task-orchestrator";
 import type { Logger } from "../../infra/logging";
-import type { ClaimedTask } from "@opentasks/contracts";
+import type { ClaimedTask, GoalRecord, OperationResultDto, ProjectRecord } from "@opentasks/contracts";
 import type { TaskClaimOptions, TaskRequest } from "@opentasks/contracts";
+import type { GoalService } from "../goal-service";
 import type { TaskListManager } from "../task-list-manager";
+import type { ValidationService } from "../validation-service";
 
 const logger: Logger = {
   section() {},
@@ -21,6 +23,7 @@ function createClaimedTask(overrides: Partial<ClaimedTask> = {}): ClaimedTask {
     createdAt: timestamp,
     updatedAt: timestamp,
     projectId: "demo-project",
+    goalId: "goal_demo",
     title: "Demo task",
     description: "A task used for unit testing.",
     status: "assigned",
@@ -41,16 +44,98 @@ function createClaimedTask(overrides: Partial<ClaimedTask> = {}): ClaimedTask {
   };
 }
 
+const project: ProjectRecord = {
+  id: "demo-project",
+  key: "demo-project",
+  name: "Demo Project",
+  description: "Demo project for testing",
+  workingDirectory: ".",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z"
+};
+
+const goal: GoalRecord = {
+  id: "goal_demo",
+  projectId: project.id,
+  key: "initial-goal",
+  name: "Initial Goal",
+  description: "",
+  status: "active",
+  priority: "P0",
+  metadata: {},
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z"
+};
+
+const validationService: ValidationService = {
+  async validateCreateProjectInput(): Promise<OperationResultDto> {
+    throw new Error("not used");
+  },
+  async ensureProjectGoals(): Promise<OperationResultDto> {
+    return {
+      status: "ok",
+      message: "ok",
+      guidance: [],
+      context: {
+        project,
+        goals: [goal]
+      }
+    };
+  },
+  async ensureProject(): Promise<OperationResultDto> {
+    return {
+      status: "ok",
+      message: "ok",
+      guidance: [],
+      context: { project }
+    };
+  },
+  async ensureGoalInProject(): Promise<OperationResultDto> {
+    return {
+      status: "ok",
+      message: "ok",
+      guidance: [],
+      context: { project, goal }
+    };
+  },
+  async ensureTask(): Promise<OperationResultDto> {
+    throw new Error("not used");
+  },
+  async ensureTaskInGoal(): Promise<OperationResultDto> {
+    throw new Error("not used");
+  }
+};
+
+const goalService: GoalService = {
+  async createGoal() {
+    throw new Error("not used");
+  },
+  async updateGoal() {
+    throw new Error("not used");
+  },
+  async getGoals() {
+    throw new Error("not used");
+  },
+  async resolveNextGoal() {
+    return goal;
+  },
+  async listGoals() {
+    return { goals: [goal] };
+  }
+};
+
 test("task orchestrator returns a claimed task directly in phase one", async () => {
   let capturedOptions: TaskClaimOptions | null = null;
 
   const taskListManager: TaskListManager = {
     async claimNextTask(
       projectId: string,
+      goalId: string,
       agentName: string,
       options: TaskClaimOptions
     ): Promise<ClaimedTask | null> {
       assert.equal(projectId, "demo-project");
+      assert.equal(goalId, "goal_demo");
       assert.equal(agentName, "agent-one");
       capturedOptions = options;
       return createClaimedTask({ assignedTo: agentName });
@@ -59,6 +144,8 @@ test("task orchestrator returns a claimed task directly in phase one", async () 
 
   const orchestrator = createTaskOrchestrator({
     logger,
+    validationService,
+    goalService,
     taskListManager,
     defaultLeaseDurationSeconds: 900
   });
@@ -69,10 +156,10 @@ test("task orchestrator returns a claimed task directly in phase one", async () 
     taskHint: "pick the best task"
   };
 
-  const claimedTask = await orchestrator.prepareTask(request);
+  const result = await orchestrator.prepareTask(request);
 
-  assert.ok(claimedTask);
-  assert.match(claimedTask.id, /^task_/);
+  assert.equal(result.status, "ok");
+  assert.match(result.context?.task?.id ?? "", /^task_/);
   assert.deepEqual(capturedOptions, {
     taskHint: "pick the best task",
     capabilities: undefined,
@@ -80,7 +167,7 @@ test("task orchestrator returns a claimed task directly in phase one", async () 
   });
 });
 
-test("task orchestrator returns null when no task is available", async () => {
+test("task orchestrator returns a no_task_available result when no task is available", async () => {
   const taskListManager: TaskListManager = {
     async claimNextTask(): Promise<ClaimedTask | null> {
       return null;
@@ -89,14 +176,16 @@ test("task orchestrator returns null when no task is available", async () => {
 
   const orchestrator = createTaskOrchestrator({
     logger,
+    validationService,
+    goalService,
     taskListManager,
     defaultLeaseDurationSeconds: 300
   });
 
-  const claimedTask = await orchestrator.prepareTask({
+  const result = await orchestrator.prepareTask({
     agentName: "agent-one",
     projectId: "demo-project"
   });
 
-  assert.equal(claimedTask, null);
+  assert.equal(result.status, "no_task_available");
 });

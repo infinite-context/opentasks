@@ -4,7 +4,7 @@
 
 This document describes the system components and runtime flow for `opentasks`.
 
-The architecture is based on a self-learning task management system that works alongside external agents, coordinates task execution through MCP, and preserves structured task state in SQLite (via Drizzle ORM) while the retrieval and learning subsystems continue to grow.
+The architecture is based on a goal-driven task orchestration system that works alongside external agents, coordinates task execution through MCP, and preserves structured project, goal, and task state in SQLite (via Drizzle ORM) while the retrieval and learning subsystems remain deferred.
 
 ## System boundary
 
@@ -25,7 +25,8 @@ Databases used for task state and retrievable memory.
 
 The web UI is the browser-facing observability surface for the system.
 
-It visualizes backend task coordination state through HTTP and SSE, and it uses the same canonical project, task, and task event models that the backend uses internally.
+It visualizes backend task coordination state through HTTP and SSE, and it uses the same canonical project, goal, task, and task event models that the backend uses internally.
+
 
 **Important Architectural Note:** The Web UI is intentionally built using Vanilla TypeScript, raw HTML string templates, and Vite. It does not use a modern reactive framework like React or Vue. This is by design to maintain a specific architectural footprint. Do not attempt to rewrite the frontend to a different framework.
 
@@ -47,15 +48,17 @@ Additional providers can be supported through the model provider service.
 
 The MCP server is the agent-facing entry point into the system.
 
-It runs as a long-lived stdio MCP service and exposes task lifecycle tools to external agents.
+It runs as a long-lived stdio MCP service and exposes project, goal, and task tools to external agents.
 
-These tools currently include task request, start, heartbeat, complete, fail, release, and task inspection operations.
+These tools currently include project creation and lookup, goal creation and update, goal listing, task creation, orchestrated task request, task lifecycle operations, and task inspection.
 
 ### HTTP Server
 
 The HTTP server is the browser-facing transport for dashboard and task inspection flows.
 
 It exposes JSON read endpoints for dashboard snapshots, task lists, and task detail, and it exposes an SSE stream for live dashboard refresh.
+
+It exposes the project-aware read endpoints needed by the web UI, including project-driven dashboard and task inspection flows.
 
 It is built using Fastify and utilizes `fastify-type-provider-zod` for native request validation against the shared `@opentasks/contracts` schemas.
 
@@ -65,17 +68,37 @@ The logger records operational events related to task requests and run processin
 
 It exists to preserve traceability around the execution and learning paths.
 
+### Validation Service
+
+The validation service provides shared cross-aggregate checks for the active runtime.
+
+It verifies project existence, goal existence, project-goal ownership, and task-goal ownership, and it returns standardized service outcomes that the MCP transport can render consistently.
+
+### Project Service
+
+The project service owns project creation and lookup behavior.
+
+It is the application-facing layer above project persistence and is responsible for returning standardized project-oriented responses and project list responses for MCP consumers.
+
+### Goal Service
+
+The goal service owns goal creation, goal updates, goal listing, and goal selection for orchestration.
+
+It resolves the next eligible goal for a project before task claiming occurs, and it returns standardized missing-goal and goal-mismatch outcomes for MCP consumers.
+
 ### Task Orchestrator
 
-The task orchestrator coordinates task selection and overall task flow.
+The task orchestrator coordinates goal-aware task selection and overall task flow.
 
-It requests available work from the task list manager and returns the claimed task for delivery through MCP.
+It validates the request, asks the goal service to resolve the next eligible goal for the project, then asks the task list manager to claim the next available task within that goal.
 
 ### Task List Manager
 
 The task list manager is responsible for selecting available work from the task database.
 
-It handles task retrieval, assignment, and dependency-aware task availability.
+It handles goal-scoped task retrieval, assignment, and dependency-aware task availability.
+
+Its active selection path is SQLite-backed and still uses an atomic goal-scoped claim query in the storage adapter.
 
 ### Task Query Service
 
@@ -91,15 +114,15 @@ It derives summary metrics, pipeline counts, recent activity, agent workload, an
 
 ### Context Hydrator
 
-The context hydrator enriches a selected task with relevant prior memory before the task is returned to the external agent.
+The context hydrator will eventually enrich a selected task with relevant prior memory before the task is returned to the external agent.
 
 It gathers this context through the vector search engine.
 
-This component remains part of the architecture, but the active execution path currently returns claimed tasks directly while retrieval-backed hydration is still being introduced.
+This component remains part of the architecture, but it is not part of the active runtime yet.
 
 ### Indexer
 
-The indexer processes completed run data and prepares memory artifacts for storage.
+The indexer will eventually process completed run data and prepare memory artifacts for storage.
 
 It is responsible for turning run output into indexed chunks or other reusable context objects.
 
@@ -107,19 +130,19 @@ This component exists structurally but is not part of the active runtime startup
 
 ### Vector Search Engine
 
-The vector search engine retrieves relevant prior memory for task hydration and indexing workflows.
+The vector search engine will eventually retrieve relevant prior memory for task hydration and indexing workflows.
 
 It queries the vector database and returns context for downstream use.
 
 ### Internal Agent
 
-The internal agent is a lower-cost model-driven worker used during contextual indexing.
+The internal agent is a lower-cost model-driven worker intended for future contextual indexing.
 
 It processes run data and helps generate structured context artifacts for storage.
 
 ### Model Provider Service
 
-The model provider service is the internal abstraction for model requests.
+The model provider service is the internal abstraction for future model requests.
 
 It sends requests to OpenRouter and returns responses to the internal agent.
 
@@ -127,13 +150,15 @@ It isolates provider-specific logic so additional model backends can be added la
 
 ## Storage components
 
-### SQLite Task Database
+### SQLite Coordination Database
 
-The SQLite task database stores task state, dependency data, assignment state, task events, and task availability information.
+The SQLite coordination database stores project state, goal state, task state, dependency data, assignment state, task events, and task availability information.
 
-It is the backing store queried by the task service. It uses Drizzle ORM for type-safe query building and schema management, replacing brittle raw SQL strings.
+It is the backing store queried by the project, goal, validation, and task services. It uses Drizzle ORM for type-safe query building and schema management, replacing brittle raw SQL strings.
 
-It is also the source of truth for persisted object identifiers. Project, task, and task event IDs use prefixed identifiers such as `project_<id>`, `task_<id>`, and `task_event_<id>`.
+It is also the source of truth for persisted object identifiers. Project, goal, task, and task event IDs use prefixed identifiers such as `project_<id>`, `goal_<id>`, `task_<id>`, and `task_event_<id>`.
+
+The current bootstrap path supports legacy SQLite databases by backfilling `tasks.goal_id`, creating default goals for existing projects when needed, and only then creating goal-dependent indexes.
 
 ### Vector Database
 
@@ -150,9 +175,11 @@ The execution loop is the path used to prepare and return work to an external ag
 1. The external agent requests a task through the MCP server.
 2. The MCP server forwards the request to the execution loop.
 3. The execution loop forwards the request to the task orchestrator.
-4. The task orchestrator asks the task list manager to claim the next available task.
-5. The task list manager uses the Drizzle-backed SQLite task database for dependency-aware atomic claiming.
-6. The claimed task is returned through the MCP server to the external agent.
+4. The task orchestrator calls the validation service to verify the project and ensure that goals exist.
+5. The task orchestrator asks the goal service to resolve the next eligible goal for the project.
+6. The task orchestrator asks the task list manager to claim the next available task in that goal.
+7. The task list manager uses the Drizzle-backed SQLite coordination database for dependency-aware atomic claiming.
+8. The claimed task is returned through the MCP server to the external agent.
 
 The MCP surface also supports additional lifecycle operations after claiming a task:
 
@@ -161,17 +188,18 @@ The MCP surface also supports additional lifecycle operations after claiming a t
 3. The external agent completes, fails, or releases the task.
 4. Each transition is persisted and recorded in the task event log.
 
+The MCP surface also supports project and goal management operations used before task execution begins:
+
+1. The external agent can create a project.
+2. The external agent can read a project or list projects.
+3. The external agent can create, update, and list goals for a project.
+4. Task creation requires an existing project-goal pair and is rejected with standardized guidance when that context is missing.
+
 ### Learning loop
 
-The learning loop is the path used to turn completed work into reusable memory.
+The learning loop is the path that will eventually turn completed work into reusable memory.
 
-1. The external agent submits completed run context back to the system.
-2. The MCP server forwards that context to the indexer.
-3. The indexer calls the internal agent for contextual indexing work.
-4. The internal agent sends model requests through the model provider service.
-5. The model provider service communicates with OpenRouter.
-6. The internal agent returns generated context artifacts to the indexing workflow.
-7. The indexer inserts or updates stored memory in the vector database.
+This path is intentionally deferred and is not part of the active runtime yet.
 
 ### Dashboard read path
 
@@ -180,18 +208,22 @@ The dashboard read path is the browser-facing observability flow.
 1. The web UI requests a dashboard snapshot through the HTTP server.
 2. The HTTP server validates query parameters with shared schemas.
 3. The HTTP server calls the dashboard query service or task query service.
-4. The query service loads canonical project, task, and event data from the task store.
+4. The query service loads canonical project, goal, task, and event data from the coordination store.
 5. Aggregate dashboard DTOs are built around canonical entities.
 6. The response is returned to the browser as JSON.
 7. The SSE endpoint periodically emits fresh dashboard snapshot events for live updates.
 
+The browser UI uses this read path to maintain its active project context and to keep project-scoped dashboard state synchronized with live backend data.
+
 ## System flow
 
-The system currently operates through an active task coordination path, an active dashboard read path, and a defined learning path. The task path handles task selection, dependency-aware claiming, lease management, lifecycle transitions, and delivery through MCP. The dashboard path handles browser-oriented observability through HTTP and SSE over the same task store. The learning path remains part of the architecture and continues to define how completed work will eventually become reusable context for future runs.
+The system currently operates through an active goal-driven task coordination path and an active dashboard read path. The task path handles project and goal validation, goal selection, dependency-aware claiming, lease management, lifecycle transitions, and delivery through MCP. The dashboard path handles browser-oriented observability through HTTP and SSE over the same coordination store. The retrieval, indexing, and model-backed learning components remain deferred for a later phase.
+
+The system also now exposes standardized operation outcomes for mutation-style workflows so transport adapters can render actionable guidance without owning business rules themselves.
 
 ## Shared contracts
 
-The system currently uses a canonical shared contract package at `packages/contracts`, with server-local `shared` modules acting as app-level facades where helpful.
+The system currently uses a canonical shared contract package at `packages/contracts` as the single source of truth for cross-app contracts.
 
 The contract package is separated into three categories:
 
@@ -199,9 +231,9 @@ The contract package is separated into three categories:
 Base structural interfaces such as identity and auditable models.
 
 2. `types`
-Persisted or domain-facing entity/state contracts such as projects, tasks, claimed tasks, task events, and memory artifacts.
+Persisted or domain-facing entity/state contracts such as projects, goals, tasks, claimed tasks, task events, operation outcomes, and memory artifacts.
 
 3. `dtos`
-Transport-facing and workflow input/output shapes such as task requests, task completions, task releases, task detail responses, dashboard snapshots, hydrated task payloads, and model request DTOs.
+Transport-facing and workflow input/output shapes such as project and goal commands, task requests, task completions, task releases, task detail responses, dashboard snapshots, standardized operation results, hydrated task payloads, and model request DTOs.
 
 Runtime validation schemas for these contracts live alongside them so MCP and HTTP can validate from the same source.

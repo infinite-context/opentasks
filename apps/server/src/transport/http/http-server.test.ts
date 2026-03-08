@@ -3,7 +3,10 @@ import test from "node:test";
 import type { Logger } from "../../infra/logging";
 import { createInMemoryTaskStore } from "../../infra/storage/in-memory-task-store";
 import { createDashboardQueryService } from "../../system/dashboard-query-service";
+import { createGoalService } from "../../system/goal-service";
+import { createProjectService } from "../../system/project-service";
 import { createTaskQueryService } from "../../system/task-query-service";
+import { createValidationService } from "../../system/validation-service";
 import { createHttpTransport } from "./http-server";
 
 const logger: Logger = {
@@ -14,6 +17,18 @@ const logger: Logger = {
 
 test("http transport serves dashboard snapshots and task detail", async () => {
   const taskStore = createInMemoryTaskStore({ logger });
+  const validationService = createValidationService({ logger, store: taskStore });
+  const projectService = createProjectService({
+    logger,
+    projectStore: taskStore,
+    validationService
+  });
+  const goalService = createGoalService({
+    logger,
+    goalStore: taskStore,
+    taskStore,
+    validationService
+  });
   const dashboardQueryService = createDashboardQueryService({ logger, taskStore });
   const taskQueryService = createTaskQueryService({ logger, taskStore });
   const httpTransport = createHttpTransport({
@@ -22,6 +37,8 @@ test("http transport serves dashboard snapshots and task detail", async () => {
     appVersion: "0.1.0",
     projectPath: process.cwd(),
     port: 3210,
+    projectService,
+    goalService,
     dashboardQueryService,
     taskQueryService
   });
@@ -29,6 +46,37 @@ test("http transport serves dashboard snapshots and task detail", async () => {
   await httpTransport.start();
 
   try {
+    const projectsResponse = await fetch("http://127.0.0.1:3210/api/projects?limit=10");
+    assert.equal(projectsResponse.status, 200);
+    const projectsDto = (await projectsResponse.json()) as {
+      projects: Array<{ id: string; key: string; name: string }>;
+    };
+    assert.ok(projectsDto.projects.length >= 2);
+    assert.ok(projectsDto.projects.some((project) => project.key === "demo-project"));
+
+    const createProjectResponse = await fetch("http://127.0.0.1:3210/api/projects", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        key: "http-created-project",
+        name: "HTTP Created Project",
+        description: "Project created via HTTP test",
+        workingDirectory: "."
+      })
+    });
+    assert.equal(createProjectResponse.status, 201);
+    const createdProject = (await createProjectResponse.json()) as { id: string; key: string; name: string };
+    assert.equal(createdProject.key, "http-created-project");
+
+    const goalsResponse = await fetch("http://127.0.0.1:3210/api/goals?projectId=demo-project");
+    assert.equal(goalsResponse.status, 200);
+    const goalsDto = (await goalsResponse.json()) as {
+      goals: Array<{ id: string; key: string; name: string }>;
+    };
+    assert.ok(goalsDto.goals.length >= 1);
+
     const dashboardResponse = await fetch("http://127.0.0.1:3210/api/dashboard?projectId=demo-project");
     assert.equal(dashboardResponse.status, 200);
     const dashboard = (await dashboardResponse.json()) as {
