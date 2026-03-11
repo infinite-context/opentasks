@@ -9,6 +9,7 @@ import {
   goalListQuerySchema,
   projectListQuerySchema,
   taskActionSchema as sharedTaskActionSchema,
+  taskClaimByIdSchema,
   taskCompletionSchema,
   taskFailureSchema,
   taskListQuerySchema,
@@ -50,6 +51,7 @@ const taskListQueryShape = taskListQuerySchema.shape;
 const taskSearchQueryShape = taskSearchQuerySchema.shape;
 const dashboardQueryShape = dashboardQuerySchema.shape;
 const taskActionShape = sharedTaskActionSchema.shape;
+const taskClaimByIdShape = taskClaimByIdSchema.shape;
 
 export function createMcpTransport({
   logger,
@@ -231,6 +233,23 @@ export function createMcpTransport({
       inputSchema: requestTaskShape
     },
     async (args) => toToolResult(await executionLoop.run(args))
+  );
+
+  server.registerTool(
+    "claim_task_by_id",
+    {
+      title: "Claim Task By Id",
+      description: "Claim a specific available task by id if it is dependency-ready and belongs to an active goal.",
+      inputSchema: taskClaimByIdShape
+    },
+    async (args) =>
+      toToolResult(
+        await taskService.claimTaskById(
+          args.taskId,
+          args.agentName,
+          args.leaseDurationSeconds
+        )
+      )
   );
 
   server.registerTool(

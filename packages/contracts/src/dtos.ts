@@ -85,6 +85,12 @@ export interface TaskSearchQuery extends TaskQueryFilters {
   query: string;
 }
 
+export interface TaskClaimByIdInput {
+  taskId: string;
+  agentName: string;
+  leaseDurationSeconds?: number;
+}
+
 export interface TaskCompletion {
   summary: string;
   metadata?: Record<string, unknown>;

@@ -194,6 +194,10 @@ export const taskActionSchema = z.object({
   agentName: z.string().min(1)
 });
 
+export const taskClaimByIdSchema = taskActionSchema.extend({
+  leaseDurationSeconds: z.coerce.number().int().positive().optional()
+});
+
 export const taskCompletionSchema = z.object({
   summary: z.string().min(1),
   metadata: metadataSchema.optional()

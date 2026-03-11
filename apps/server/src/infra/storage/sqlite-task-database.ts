@@ -305,6 +305,80 @@ export function createSqliteTaskDatabase({
         return getTaskByIdFromDb(db, candidateRaw.id) as ClaimedTask | null;
       })();
     },
+    async claimTaskById(
+      taskId: string,
+      agentName: string,
+      options: TaskClaimOptions
+    ): Promise<ClaimedTask | null> {
+      logger.step(
+        "storage:sqlite-task-db",
+        `SQLite task store attempts to claim explicit task "${taskId}".`
+      );
+
+      return sqliteDb.transaction(() => {
+        const task = getTaskByIdFromDb(db, taskId);
+        if (!task) {
+          return null;
+        }
+
+        const goal = getGoalByIdFromDb(db, task.goalId);
+        if (!goal || goal.projectId !== task.projectId || goal.status !== "active") {
+          return null;
+        }
+
+        requeueExpiredTasksInTransaction(db, task.projectId, goal.id);
+
+        const candidateRaw = sqliteDb.prepare(`
+          SELECT t.id
+          FROM tasks t
+          WHERE t.id = ?
+            AND t.project_id = ?
+            AND t.goal_id = ?
+            AND t.status = 'available'
+            AND (t.available_at IS NULL OR t.available_at <= datetime('now'))
+            AND NOT EXISTS (
+              SELECT 1
+              FROM task_dependencies td
+              JOIN tasks dep ON dep.id = td.depends_on_task_id
+              WHERE td.task_id = t.id
+                AND dep.status <> 'completed'
+            )
+          LIMIT 1
+        `).get(taskId, task.projectId, goal.id) as { id: string } | undefined;
+
+        if (!candidateRaw) {
+          return null;
+        }
+
+        db.update(schema.tasks)
+          .set({
+            status: 'assigned',
+            assignedTo: agentName,
+            assignedAt: sql`datetime('now')`,
+            leaseExpiresAt: sql`datetime('now', '+' || ${options.leaseDurationSeconds} || ' seconds')`,
+            updatedAt: sql`datetime('now')`,
+            blockedReason: null,
+            lastError: null
+          })
+          .where(eq(schema.tasks.id, candidateRaw.id))
+          .run();
+
+        insertTaskEvent(db, {
+          taskId: candidateRaw.id,
+          projectId: task.projectId,
+          eventType: "task_claimed",
+          actorType: "agent",
+          actorId: agentName,
+          payload: {
+            taskHint: options.taskHint ?? null,
+            capabilities: options.capabilities ?? [],
+            leaseDurationSeconds: options.leaseDurationSeconds
+          }
+        });
+
+        return getTaskByIdFromDb(db, candidateRaw.id) as ClaimedTask | null;
+      })();
+    },
     async getTaskById(taskId: string): Promise<TaskRecord | null> {
       return getTaskByIdFromDb(db, taskId);
     },

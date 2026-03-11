@@ -39,6 +39,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     assert.ok(toolNames.includes("search_tasks"));
     assert.ok(toolNames.includes("get_project_overview"));
     assert.ok(toolNames.includes("request_task"));
+    assert.ok(toolNames.includes("claim_task_by_id"));
     assert.ok(toolNames.includes("start_task"));
     assert.ok(toolNames.includes("heartbeat_task"));
     assert.ok(toolNames.includes("complete_task"));
@@ -84,7 +85,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     const taskSearch = taskSearchResult.structuredContent as {
       query: string;
       results: Array<{
-        task: { projectId: string; title: string };
+        task: { id: string; projectId: string; title: string };
         score: number;
         matchedFields: string[];
       }>;
@@ -96,6 +97,23 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     assert.ok(taskSearch.results.some((result) => result.task.title.includes("Hydrate")));
     assert.ok(taskSearch.results.every((result) => result.score > 0));
     assert.ok(taskSearch.results.every((result) => result.matchedFields.length > 0));
+
+    const explicitClaimResult = await client.callTool({
+      name: "claim_task_by_id",
+      arguments: {
+        taskId: taskSearch.results[0]?.task.id,
+        agentName: "agent-explicit",
+        leaseDurationSeconds: 120
+      }
+    });
+    const explicitClaim = explicitClaimResult.structuredContent as {
+      task: { id: string; status: string; assignedTo: string } | null;
+    };
+
+    assert.ok(explicitClaim.task);
+    assert.equal(explicitClaim.task.id, taskSearch.results[0]?.task.id);
+    assert.equal(explicitClaim.task.status, "assigned");
+    assert.equal(explicitClaim.task.assignedTo, "agent-explicit");
 
     const overviewResult = await client.callTool({
       name: "get_project_overview",
@@ -114,34 +132,19 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     assert.ok(overview.tasks.every((task) => task.projectId === overview.project?.id));
     assert.ok(overview.summary.totalTasks >= overview.tasks.length);
 
-    const claimedResult = await client.callTool({
-      name: "request_task",
-      arguments: {
-        agentName: "agent-one",
-        projectId: "demo-project",
-        taskHint: "claim the next task"
-      }
-    });
-    const claimed = claimedResult.structuredContent as {
-      task: { id: string; status: string } | null;
-    };
-
-    assert.ok(claimed.task);
-    assert.equal(claimed.task.status, "assigned");
-
     await client.callTool({
       name: "start_task",
       arguments: {
-        taskId: claimed.task.id,
-        agentName: "agent-one"
+        taskId: explicitClaim.task.id,
+        agentName: "agent-explicit"
       }
     });
 
     await client.callTool({
       name: "heartbeat_task",
       arguments: {
-        taskId: claimed.task.id,
-        agentName: "agent-one",
+        taskId: explicitClaim.task.id,
+        agentName: "agent-explicit",
         leaseDurationSeconds: 120
       }
     });
@@ -149,8 +152,8 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     await client.callTool({
       name: "complete_task",
       arguments: {
-        taskId: claimed.task.id,
-        agentName: "agent-one",
+        taskId: explicitClaim.task.id,
+        agentName: "agent-explicit",
         summary: "finished successfully"
       }
     });
@@ -158,7 +161,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     const loadedResult = await client.callTool({
       name: "get_task",
       arguments: {
-        taskId: claimed.task.id
+        taskId: explicitClaim.task.id
       }
     });
     const loaded = loadedResult.structuredContent as {
