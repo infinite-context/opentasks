@@ -1,6 +1,5 @@
 import type { Logger } from "../../infra/logging";
-import type { TaskRecord } from "@opentasks/contracts";
-import type { HydratedTask } from "@opentasks/contracts";
+import type { HydratedTask, TaskRecord } from "@opentasks/contracts";
 import type { VectorSearchEngine } from "../vector-search-engine";
 import type { ContextHydrator } from "./types";
 
@@ -20,14 +19,17 @@ export function createContextHydrator({
         `Context hydrator enriches task \"${task.id}\" with reusable context.`
       );
 
-      const relatedMemories = await vectorSearchEngine.searchTaskContext(task);
+      const items = await vectorSearchEngine.searchTaskContext(task);
 
       return {
         ...task,
         context: {
           taskId: task.id,
-          relatedMemories,
-          notes: ["Hydrated from the vector search engine for the runnable skeleton."]
+          items,
+          notes: [
+            "Hydrated from the deferred retrieval subsystem.",
+            `Retrieved ${items.length} context item(s) scoped to the selected task.`
+          ]
         }
       };
     }

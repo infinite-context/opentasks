@@ -30,6 +30,14 @@ export const taskEventTypeSchema = z.enum([
 ]);
 export const taskEventActorTypeSchema = z.enum(["agent", "system"]);
 export const taskOutcomeSchema = z.enum(["success", "failure"]);
+export const retrievedContextItemKindSchema = z.enum([
+  "code_chunk",
+  "file_summary",
+  "symbol_summary",
+  "instruction",
+  "architecture_note",
+  "run_note"
+]);
 
 export const projectRecordSchema = z.object({
   id: z.string().min(1),
@@ -101,6 +109,22 @@ export const memoryArtifactSchema = z.object({
   taskId: z.string().min(1),
   summary: z.string().min(1),
   source: z.literal("contextual-indexing")
+});
+
+export const retrievedContextItemSchema = z.object({
+  id: z.string().min(1),
+  kind: retrievedContextItemKindSchema,
+  projectId: z.string().min(1),
+  goalId: z.string().min(1).nullable().optional(),
+  taskId: z.string().min(1).nullable().optional(),
+  content: z.string().min(1),
+  summary: z.string().min(1).nullable().optional(),
+  filePath: z.string().min(1).nullable().optional(),
+  symbolName: z.string().min(1).nullable().optional(),
+  startLine: z.number().int().positive().nullable().optional(),
+  endLine: z.number().int().positive().nullable().optional(),
+  tags: z.array(z.string().min(1)).optional(),
+  score: z.number().finite().nullable().optional()
 });
 
 export const createTaskInputSchema = z.object({
@@ -202,7 +226,7 @@ export const taskReleaseSchema = z.object({
 
 export const contextPacketSchema = z.object({
   taskId: z.string().min(1),
-  relatedMemories: z.array(z.string().min(1)),
+  items: z.array(retrievedContextItemSchema),
   notes: z.array(z.string())
 });
 
