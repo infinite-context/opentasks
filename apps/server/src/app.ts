@@ -110,7 +110,9 @@ export function createApp(overrides?: Partial<AppEnv>): App {
         projectService,
         goalService,
         taskService,
-        executionLoop
+        executionLoop,
+        taskQueryService,
+        dashboardQueryService
       })
     : null;
   const httpTransport = env.httpEnabled

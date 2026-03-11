@@ -5,21 +5,25 @@ import {
   createGoalInputSchema,
   createProjectInputSchema,
   createTaskInputSchema,
+  dashboardQuerySchema,
   goalListQuerySchema,
   projectListQuerySchema,
   taskActionSchema as sharedTaskActionSchema,
   taskCompletionSchema,
   taskFailureSchema,
+  taskListQuerySchema,
   taskReleaseSchema,
   taskRequestSchema,
   updateGoalInputSchema
 } from "@opentasks/contracts/schemas";
 import type { OperationResultDto } from "@opentasks/contracts";
+import type { DashboardQueryService } from "../../system/dashboard-query-service";
 import type { Logger } from "../../infra/logging";
 import type { ExecutionLoop } from "../../system/execution-loop/execution-loop";
 import type { GoalService } from "../../system/goal-service";
 import type { ProjectService } from "../../system/project-service";
 import type { TaskService } from "../../system/task-service";
+import type { TaskQueryService } from "../../system/task-query-service";
 import type { McpTransport } from "./types";
 
 interface CreateMcpTransportParams {
@@ -30,6 +34,8 @@ interface CreateMcpTransportParams {
   goalService: GoalService;
   taskService: TaskService;
   executionLoop: ExecutionLoop;
+  taskQueryService: TaskQueryService;
+  dashboardQueryService: DashboardQueryService;
 }
 
 const requestTaskShape = taskRequestSchema.shape;
@@ -39,6 +45,8 @@ const createGoalInputShape = createGoalInputSchema.shape;
 const updateGoalInputShape = updateGoalInputSchema.shape;
 const projectListQueryShape = projectListQuerySchema.shape;
 const goalListQueryShape = goalListQuerySchema.shape;
+const taskListQueryShape = taskListQuerySchema.shape;
+const dashboardQueryShape = dashboardQuerySchema.shape;
 const taskActionShape = sharedTaskActionSchema.shape;
 
 export function createMcpTransport({
@@ -48,7 +56,9 @@ export function createMcpTransport({
   projectService,
   goalService,
   taskService,
-  executionLoop
+  executionLoop,
+  taskQueryService,
+  dashboardQueryService
 }: CreateMcpTransportParams): McpTransport {
   const server = new McpServer(
     {
@@ -133,6 +143,51 @@ export function createMcpTransport({
       inputSchema: goalListQueryShape
     },
     async (args) => toToolResult(await goalService.getGoals(args.projectId))
+  );
+
+  server.registerTool(
+    "list_tasks",
+    {
+      title: "List Tasks",
+      description: "List tasks using project, goal, status, assignment, or limit filters.",
+      inputSchema: taskListQueryShape
+    },
+    async (args) => {
+      const result = await taskQueryService.listTasks(args);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Loaded ${result.tasks.length} task(s).`
+          }
+        ],
+        structuredContent: { ...result }
+      };
+    }
+  );
+
+  server.registerTool(
+    "get_project_overview",
+    {
+      title: "Get Project Overview",
+      description:
+        "Load a project overview snapshot including summary, pipeline, tasks, activity, agents, and health.",
+      inputSchema: dashboardQueryShape
+    },
+    async (args) => {
+      const result = await dashboardQueryService.getSnapshot(args);
+      const projectName = result.project?.name ?? result.project?.key ?? args.projectId ?? "current scope";
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Loaded project overview for ${projectName}.`
+          }
+        ],
+        structuredContent: { ...result }
+      };
+    }
   );
 
   server.registerTool(

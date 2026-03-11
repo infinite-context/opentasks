@@ -35,6 +35,8 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     const tools = await client.listTools();
     const toolNames = tools.tools.map((tool) => tool.name);
 
+    assert.ok(toolNames.includes("list_tasks"));
+    assert.ok(toolNames.includes("get_project_overview"));
     assert.ok(toolNames.includes("request_task"));
     assert.ok(toolNames.includes("start_task"));
     assert.ok(toolNames.includes("heartbeat_task"));
@@ -42,6 +44,50 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     assert.ok(toolNames.includes("fail_task"));
     assert.ok(toolNames.includes("release_task"));
     assert.ok(toolNames.includes("get_task"));
+
+    const projectResult = await client.callTool({
+      name: "get_project",
+      arguments: {
+        projectId: "demo-project"
+      }
+    });
+    const project = projectResult.structuredContent as {
+      project: { id: string; key: string } | null;
+    };
+
+    assert.ok(project.project);
+    assert.equal(project.project.key, "demo-project");
+
+    const taskListResult = await client.callTool({
+      name: "list_tasks",
+      arguments: {
+        projectId: "demo-project",
+        limit: 10
+      }
+    });
+    const taskList = taskListResult.structuredContent as {
+      tasks: Array<{ projectId: string }>;
+    };
+
+    assert.ok(taskList.tasks.length > 0);
+    assert.ok(taskList.tasks.every((task) => task.projectId === project.project?.id));
+
+    const overviewResult = await client.callTool({
+      name: "get_project_overview",
+      arguments: {
+        projectId: "demo-project"
+      }
+    });
+    const overview = overviewResult.structuredContent as {
+      project: { id: string; key: string } | null;
+      tasks: Array<{ projectId: string }>;
+      summary: { totalTasks: number };
+    };
+
+    assert.ok(overview.project);
+    assert.equal(overview.project.key, "demo-project");
+    assert.ok(overview.tasks.every((task) => task.projectId === overview.project?.id));
+    assert.ok(overview.summary.totalTasks >= overview.tasks.length);
 
     const claimedResult = await client.callTool({
       name: "request_task",
