@@ -12,6 +12,7 @@ import {
   taskCompletionSchema,
   taskFailureSchema,
   taskListQuerySchema,
+  taskSearchQuerySchema,
   taskReleaseSchema,
   taskRequestSchema,
   updateGoalInputSchema
@@ -46,6 +47,7 @@ const updateGoalInputShape = updateGoalInputSchema.shape;
 const projectListQueryShape = projectListQuerySchema.shape;
 const goalListQueryShape = goalListQuerySchema.shape;
 const taskListQueryShape = taskListQuerySchema.shape;
+const taskSearchQueryShape = taskSearchQuerySchema.shape;
 const dashboardQueryShape = dashboardQuerySchema.shape;
 const taskActionShape = sharedTaskActionSchema.shape;
 
@@ -159,6 +161,27 @@ export function createMcpTransport({
           {
             type: "text" as const,
             text: `Loaded ${result.tasks.length} task(s).`
+          }
+        ],
+        structuredContent: { ...result }
+      };
+    }
+  );
+
+  server.registerTool(
+    "search_tasks",
+    {
+      title: "Search Tasks",
+      description: "Search tasks by title and description using a text query and optional filters.",
+      inputSchema: taskSearchQueryShape
+    },
+    async (args) => {
+      const result = await taskQueryService.searchTasks(args);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Found ${result.results.length} task(s) matching \"${result.query}\".`
           }
         ],
         structuredContent: { ...result }

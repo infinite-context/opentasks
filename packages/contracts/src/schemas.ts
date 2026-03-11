@@ -180,6 +180,15 @@ export const taskListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().optional()
 });
 
+export const taskSearchQuerySchema = z.object({
+  query: z.string().min(1),
+  projectId: z.string().min(1).optional(),
+  goalId: z.string().min(1).optional(),
+  status: z.array(taskStatusSchema).optional(),
+  assignedTo: z.string().min(1).optional(),
+  limit: z.coerce.number().int().positive().optional()
+});
+
 export const taskActionSchema = z.object({
   taskId: z.string().min(1),
   agentName: z.string().min(1)
@@ -241,6 +250,19 @@ export const goalListDtoSchema = z.object({
 
 export const taskListDtoSchema = z.object({
   tasks: z.array(taskRecordSchema)
+});
+
+export const taskSearchMatchedFieldSchema = z.enum(["title", "description"]);
+
+export const taskSearchHitDtoSchema = z.object({
+  task: taskRecordSchema,
+  score: z.number(),
+  matchedFields: z.array(taskSearchMatchedFieldSchema)
+});
+
+export const taskSearchResultDtoSchema = z.object({
+  query: z.string().min(1),
+  results: z.array(taskSearchHitDtoSchema)
 });
 
 export const taskClaimResultDtoSchema = z.object({

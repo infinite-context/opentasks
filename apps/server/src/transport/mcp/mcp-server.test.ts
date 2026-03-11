@@ -36,6 +36,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     const toolNames = tools.tools.map((tool) => tool.name);
 
     assert.ok(toolNames.includes("list_tasks"));
+    assert.ok(toolNames.includes("search_tasks"));
     assert.ok(toolNames.includes("get_project_overview"));
     assert.ok(toolNames.includes("request_task"));
     assert.ok(toolNames.includes("start_task"));
@@ -71,6 +72,30 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
 
     assert.ok(taskList.tasks.length > 0);
     assert.ok(taskList.tasks.every((task) => task.projectId === project.project?.id));
+
+    const taskSearchResult = await client.callTool({
+      name: "search_tasks",
+      arguments: {
+        projectId: "demo-project",
+        query: "hydrate context",
+        limit: 10
+      }
+    });
+    const taskSearch = taskSearchResult.structuredContent as {
+      query: string;
+      results: Array<{
+        task: { projectId: string; title: string };
+        score: number;
+        matchedFields: string[];
+      }>;
+    };
+
+    assert.equal(taskSearch.query, "hydrate context");
+    assert.ok(taskSearch.results.length > 0);
+    assert.ok(taskSearch.results.every((result) => result.task.projectId === project.project?.id));
+    assert.ok(taskSearch.results.some((result) => result.task.title.includes("Hydrate")));
+    assert.ok(taskSearch.results.every((result) => result.score > 0));
+    assert.ok(taskSearch.results.every((result) => result.matchedFields.length > 0));
 
     const overviewResult = await client.callTool({
       name: "get_project_overview",
