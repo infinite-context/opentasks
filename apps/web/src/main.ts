@@ -510,12 +510,9 @@ function renderApp(): void {
           id: project.id,
           label: project.name
         }))
-      : [
-          {
-            id: currentProjectId,
-            label: snapshot?.project?.name ?? snapshot?.project?.key ?? currentProjectId
-          }
-        ];
+      : snapshot?.project
+        ? [{ id: snapshot.project.id, label: snapshot.project.name ?? snapshot.project.key }]
+        : [];
 
   destroyAnalyticsCharts();
 

@@ -19,7 +19,6 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
       ...process.env,
       OPENTASKS_STORAGE_DRIVER: "memory",
       OPENTASKS_AUTO_MIGRATE: "false",
-      OPENTASKS_SEED_DEMO_DATA: "true",
       OPENTASKS_HTTP_ENABLED: "false"
     },
     stderr: "pipe"
@@ -47,6 +46,57 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     assert.ok(toolNames.includes("fail_task"));
     assert.ok(toolNames.includes("release_task"));
     assert.ok(toolNames.includes("get_task"));
+
+    const createProjectResult = await client.callTool({
+      name: "create_project",
+      arguments: {
+        key: "demo-project",
+        name: "Demo Project",
+        description: "Demo project for testing",
+        workingDirectory: "."
+      }
+    });
+    const createdProject = createProjectResult.structuredContent as {
+      project: { id: string; key: string };
+    };
+    assert.ok(createdProject.project);
+    assert.equal(createdProject.project.key, "demo-project");
+
+    const createGoalResult = await client.callTool({
+      name: "create_goal",
+      arguments: {
+        projectId: createdProject.project.id,
+        key: "initial-goal",
+        name: "Initial Goal"
+      }
+    });
+    const createdGoal = createGoalResult.structuredContent as {
+      goal: { id: string };
+    };
+    assert.ok(createdGoal.goal);
+
+    const createTask1Result = await client.callTool({
+      name: "create_task",
+      arguments: {
+        projectId: createdProject.project.id,
+        goalId: createdGoal.goal.id,
+        title: "Hydrate the next task with reusable context",
+        description: "Seeded task used by the current execution path."
+      }
+    });
+    const task1 = (createTask1Result.structuredContent as { task: { id: string } }).task;
+    assert.ok(task1);
+
+    await client.callTool({
+      name: "create_task",
+      arguments: {
+        projectId: createdProject.project.id,
+        goalId: createdGoal.goal.id,
+        title: "Prepare a follow-up task for the same project",
+        description: "Second seeded task that depends on the primary task.",
+        dependencyIds: [task1.id]
+      }
+    });
 
     const projectResult = await client.callTool({
       name: "get_project",

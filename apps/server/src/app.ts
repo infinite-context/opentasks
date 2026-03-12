@@ -7,7 +7,7 @@ import { loadEnv } from "./infra/config";
 import { createLogger } from "./infra/logging";
 import { createInMemoryTaskStore } from "./infra/storage/in-memory-task-store";
 import { createSqliteTaskDatabase } from "./infra/storage/sqlite-task-database";
-import { applySqliteSchema, seedSqliteDemoData } from "./infra/storage/sqlite-schema";
+import { applySqliteSchema } from "./infra/storage/sqlite-schema";
 import { createDashboardQueryService } from "./system/dashboard-query-service";
 import { createExecutionLoop } from "./system/execution-loop";
 import { createGoalService } from "./system/goal-service";
@@ -142,14 +142,8 @@ export function createApp(overrides?: Partial<AppEnv>): App {
       logger.info("bootstrap", `Starting ${env.appName} backend in ${env.environment} mode.`);
       logger.info("bootstrap", `Using ${env.storageDriver} task storage.`);
 
-      if (db) {
-        if (env.autoMigrate) {
-          applySqliteSchema(db, logger);
-        }
-
-        if (env.seedDemoData) {
-          seedSqliteDemoData(db, logger);
-        }
+      if (db && env.autoMigrate) {
+        applySqliteSchema(db, logger);
       }
 
       if (mcpTransport) {

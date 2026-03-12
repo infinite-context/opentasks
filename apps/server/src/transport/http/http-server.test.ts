@@ -17,6 +17,25 @@ const logger: Logger = {
 
 test("http transport serves dashboard snapshots and task detail", async () => {
   const taskStore = createInMemoryTaskStore({ logger });
+  const project = await taskStore.createProject({
+    key: "demo-project",
+    name: "Demo Project",
+    description: "Demo project for testing",
+    workingDirectory: "."
+  });
+  const goal = await taskStore.createGoal({
+    projectId: project.id,
+    key: "initial-goal",
+    name: "Initial Goal"
+  });
+  assert.ok(goal);
+  await taskStore.createTask({
+    projectId: project.id,
+    goalId: goal.id,
+    title: "Test task for HTTP transport",
+    description: "Task created for http-server test"
+  });
+
   const validationService = createValidationService({ logger, store: taskStore });
   const projectService = createProjectService({
     logger,
@@ -51,8 +70,8 @@ test("http transport serves dashboard snapshots and task detail", async () => {
     const projectsDto = (await projectsResponse.json()) as {
       projects: Array<{ id: string; key: string; name: string }>;
     };
-    assert.ok(projectsDto.projects.length >= 2);
-    assert.ok(projectsDto.projects.some((project) => project.key === "demo-project"));
+    assert.ok(projectsDto.projects.length >= 1);
+    assert.ok(projectsDto.projects.some((p) => p.key === "demo-project"));
 
     const createProjectResponse = await fetch("http://127.0.0.1:3210/api/projects", {
       method: "POST",

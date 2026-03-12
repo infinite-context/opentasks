@@ -6,7 +6,6 @@ export interface AppEnv {
   storageDriver: "memory" | "sqlite";
   databaseUrl: string | null;
   autoMigrate: boolean;
-  seedDemoData: boolean;
   defaultLeaseDurationSeconds: number;
   httpEnabled: boolean;
   httpPort: number;
@@ -23,7 +22,6 @@ export function loadEnv(): AppEnv {
     storageDriver: resolveStorageDriver(databaseUrl),
     databaseUrl,
     autoMigrate: parseBoolean(process.env.OPENTASKS_AUTO_MIGRATE, true),
-    seedDemoData: parseBoolean(process.env.OPENTASKS_SEED_DEMO_DATA, true),
     defaultLeaseDurationSeconds: parseInteger(process.env.OPENTASKS_DEFAULT_LEASE_SECONDS, 900),
     httpEnabled: parseBoolean(process.env.OPENTASKS_HTTP_ENABLED, true),
     httpPort: parseInteger(process.env.OPENTASKS_HTTP_PORT, 3005)
