@@ -151,10 +151,19 @@ export interface TaskListDto {
 
 export type TaskSearchMatchedField = "title" | "description";
 
+export interface TaskSearchDependencyDto {
+  id: string;
+  title: string;
+  status: TaskStatus;
+}
+
 export interface TaskSearchHitDto {
   task: TaskRecord;
   score: number;
   matchedFields: TaskSearchMatchedField[];
+  claimable: boolean;
+  nextClaimableDependencyTaskIds: string[];
+  unresolvedUpstreamDependencies: TaskSearchDependencyDto[];
 }
 
 export interface TaskSearchResultDto {

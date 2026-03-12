@@ -258,10 +258,19 @@ export const taskListDtoSchema = z.object({
 
 export const taskSearchMatchedFieldSchema = z.enum(["title", "description"]);
 
+export const taskSearchDependencyDtoSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  status: taskStatusSchema
+});
+
 export const taskSearchHitDtoSchema = z.object({
   task: taskRecordSchema,
   score: z.number(),
-  matchedFields: z.array(taskSearchMatchedFieldSchema)
+  matchedFields: z.array(taskSearchMatchedFieldSchema),
+  claimable: z.boolean(),
+  nextClaimableDependencyTaskIds: z.array(z.string().min(1)),
+  unresolvedUpstreamDependencies: z.array(taskSearchDependencyDtoSchema)
 });
 
 export const taskSearchResultDtoSchema = z.object({

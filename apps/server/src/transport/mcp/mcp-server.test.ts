@@ -88,6 +88,13 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
         task: { id: string; projectId: string; title: string };
         score: number;
         matchedFields: string[];
+        claimable: boolean;
+        nextClaimableDependencyTaskIds: string[];
+        unresolvedUpstreamDependencies: Array<{
+          id: string;
+          title: string;
+          status: string;
+        }>;
       }>;
     };
 
@@ -97,6 +104,9 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     assert.ok(taskSearch.results.some((result) => result.task.title.includes("Hydrate")));
     assert.ok(taskSearch.results.every((result) => result.score > 0));
     assert.ok(taskSearch.results.every((result) => result.matchedFields.length > 0));
+    assert.ok(taskSearch.results.every((result) => typeof result.claimable === "boolean"));
+    assert.ok(taskSearch.results.every((result) => Array.isArray(result.nextClaimableDependencyTaskIds)));
+    assert.ok(taskSearch.results.every((result) => Array.isArray(result.unresolvedUpstreamDependencies)));
 
     const explicitClaimResult = await client.callTool({
       name: "claim_task_by_id",
