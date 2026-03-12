@@ -38,6 +38,11 @@ export interface TaskStore {
     agentName: string,
     options: TaskClaimOptions
   ): Promise<ClaimedTask | null>;
+  claimTaskById(
+    taskId: string,
+    agentName: string,
+    options: TaskClaimOptions
+  ): Promise<ClaimedTask | null>;
   getTaskById(taskId: string): Promise<TaskRecord | null>;
   listTasks(filters?: TaskQueryFilters): Promise<TaskRecord[]>;
   markTaskInProgress(taskId: string, agentName: string): Promise<TaskRecord | null>;

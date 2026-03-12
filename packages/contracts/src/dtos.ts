@@ -81,6 +81,16 @@ export interface DashboardQuery {
 
 export interface TaskListQuery extends TaskQueryFilters {}
 
+export interface TaskSearchQuery extends TaskQueryFilters {
+  query: string;
+}
+
+export interface TaskClaimByIdInput {
+  taskId: string;
+  agentName: string;
+  leaseDurationSeconds?: number;
+}
+
 export interface TaskCompletion {
   summary: string;
   metadata?: Record<string, unknown>;
@@ -137,6 +147,34 @@ export interface GoalListDto {
 
 export interface TaskListDto {
   tasks: TaskRecord[];
+}
+
+export type TaskSearchMatchedField = "title" | "description";
+
+export interface TaskSearchDependencyDto {
+  id: string;
+  title: string;
+  status: TaskStatus;
+}
+
+export interface TaskSearchHitDto {
+  task: TaskRecord;
+  score: number;
+  matchedFields: TaskSearchMatchedField[];
+  claimable: boolean;
+  nextClaimableDependencyTaskIds: string[];
+  unresolvedUpstreamDependencies: TaskSearchDependencyDto[];
+}
+
+export interface TaskSearchResultDto {
+  query: string;
+  results: TaskSearchHitDto[];
+}
+
+export interface TaskQueryResolutionDto {
+  query: string;
+  recommendedTaskId: string | null;
+  recommendedTask: TaskRecord | null;
 }
 
 export interface TaskClaimResultDto {

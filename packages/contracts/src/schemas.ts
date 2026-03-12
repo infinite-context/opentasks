@@ -180,9 +180,22 @@ export const taskListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().optional()
 });
 
+export const taskSearchQuerySchema = z.object({
+  query: z.string().min(1),
+  projectId: z.string().min(1).optional(),
+  goalId: z.string().min(1).optional(),
+  status: z.array(taskStatusSchema).optional(),
+  assignedTo: z.string().min(1).optional(),
+  limit: z.coerce.number().int().positive().optional()
+});
+
 export const taskActionSchema = z.object({
   taskId: z.string().min(1),
   agentName: z.string().min(1)
+});
+
+export const taskClaimByIdSchema = taskActionSchema.extend({
+  leaseDurationSeconds: z.coerce.number().int().positive().optional()
 });
 
 export const taskCompletionSchema = z.object({
@@ -241,6 +254,34 @@ export const goalListDtoSchema = z.object({
 
 export const taskListDtoSchema = z.object({
   tasks: z.array(taskRecordSchema)
+});
+
+export const taskSearchMatchedFieldSchema = z.enum(["title", "description"]);
+
+export const taskSearchDependencyDtoSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  status: taskStatusSchema
+});
+
+export const taskSearchHitDtoSchema = z.object({
+  task: taskRecordSchema,
+  score: z.number(),
+  matchedFields: z.array(taskSearchMatchedFieldSchema),
+  claimable: z.boolean(),
+  nextClaimableDependencyTaskIds: z.array(z.string().min(1)),
+  unresolvedUpstreamDependencies: z.array(taskSearchDependencyDtoSchema)
+});
+
+export const taskSearchResultDtoSchema = z.object({
+  query: z.string().min(1),
+  results: z.array(taskSearchHitDtoSchema)
+});
+
+export const taskQueryResolutionDtoSchema = z.object({
+  query: z.string().min(1),
+  recommendedTaskId: z.string().min(1).nullable(),
+  recommendedTask: taskRecordSchema.nullable()
 });
 
 export const taskClaimResultDtoSchema = z.object({

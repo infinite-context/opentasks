@@ -12,6 +12,7 @@ import type { ValidationService } from "../validation-service";
 
 export interface TaskService {
   createTask(input: CreateTaskInput): Promise<OperationResultDto>;
+  claimTaskById(taskId: string, agentName: string, leaseDurationSeconds?: number): Promise<OperationResultDto>;
   startTask(taskId: string, agentName: string): Promise<OperationResultDto>;
   completeTask(taskId: string, agentName: string, completion: TaskCompletion): Promise<OperationResultDto>;
   failTask(taskId: string, agentName: string, failure: TaskFailure): Promise<OperationResultDto>;
@@ -55,6 +56,37 @@ export function createTaskService({
         goal: goalValidation.context?.goal,
         task
       });
+    },
+    async claimTaskById(
+      taskId: string,
+      agentName: string,
+      leaseDurationSeconds?: number
+    ): Promise<OperationResultDto> {
+      logger.step("task-service", `Claiming task "${taskId}" by id.`);
+      const validationResult = await validationService.ensureTask(taskId);
+      if (validationResult.status !== "ok") {
+        return validationResult;
+      }
+
+      const task = await taskStore.claimTaskById(taskId, agentName, {
+        leaseDurationSeconds:
+          leaseDurationSeconds && leaseDurationSeconds > 0
+            ? leaseDurationSeconds
+            : defaultLeaseDurationSeconds
+      });
+
+      if (!task) {
+        return issueResult(
+          "invalid_transition",
+          `Task ${taskId} could not be claimed.`,
+          [
+            "Make sure the task is available, dependency-ready, and belongs to an active goal before calling claim_task_by_id."
+          ],
+          validationResult.context
+        );
+      }
+
+      return okResult(`Claimed task ${task.id} for ${task.assignedTo}.`, { task });
     },
     async startTask(taskId: string, agentName: string): Promise<OperationResultDto> {
       logger.step("task-service", `Starting task "${taskId}".`);

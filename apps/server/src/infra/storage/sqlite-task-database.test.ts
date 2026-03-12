@@ -84,6 +84,63 @@ test("sqlite task store claims dependency-ready tasks and can requeue expired le
   db.close();
 });
 
+test("sqlite task store can claim a specific task by id only when it is dependency-ready", async () => {
+  const logger = createLogger();
+  const db = new Database(":memory:");
+  applySqliteSchema(db, logger);
+
+  const store = createSqliteTaskDatabase({ logger, db });
+
+  const project = db.prepare(`
+    INSERT INTO projects (id, key, name)
+    VALUES ('project_2', 'claim-by-id-project', 'Claim By Id Project')
+    RETURNING id
+  `).get() as { id: string };
+
+  const goal = db.prepare(`
+    INSERT INTO goals (id, project_id, key, name, description, status, priority, metadata_json)
+    VALUES ('goal_2', ?, 'goal-two', 'Goal Two', '', 'active', 'P0', '{}')
+    RETURNING id
+  `).get(project.id) as { id: string };
+
+  db.prepare(`
+    INSERT INTO tasks (id, project_id, goal_id, title, description, status, priority, available_at, source)
+    VALUES ('task_dependency', ?, ?, 'Dependency Task', '', 'available', 'P1', datetime('now'), 'manual')
+  `).run(project.id, goal.id);
+
+  db.prepare(`
+    INSERT INTO tasks (id, project_id, goal_id, title, description, status, priority, available_at, source)
+    VALUES ('task_target', ?, ?, 'Target Task', '', 'available', 'P0', datetime('now'), 'manual')
+  `).run(project.id, goal.id);
+
+  db.prepare(`
+    INSERT INTO task_dependencies (task_id, depends_on_task_id)
+    VALUES ('task_target', 'task_dependency')
+  `).run();
+
+  const blockedClaim = await store.claimTaskById("task_target", "agent-3", {
+    leaseDurationSeconds: 900
+  });
+  assert.equal(blockedClaim, null);
+
+  const dependencyClaim = await store.claimTaskById("task_dependency", "agent-3", {
+    leaseDurationSeconds: 900
+  });
+  assert.ok(dependencyClaim);
+  assert.equal(dependencyClaim.id, "task_dependency");
+
+  await store.completeTask("task_dependency", "agent-3", { summary: "Dependency complete" });
+
+  const targetClaim = await store.claimTaskById("task_target", "agent-4", {
+    leaseDurationSeconds: 900
+  });
+  assert.ok(targetClaim);
+  assert.equal(targetClaim.id, "task_target");
+  assert.equal(targetClaim.assignedTo, "agent-4");
+
+  db.close();
+});
+
 test("sqlite schema migrates legacy task tables without goal_id", () => {
   const logger = createLogger();
   const db = new Database(":memory:");

@@ -444,6 +444,61 @@ export function createInMemoryTaskStore({
 
       return cloneTask(task) as ClaimedTask;
     },
+    async claimTaskById(taskId, agentName, options): Promise<ClaimedTask | null> {
+      logger.step(
+        "storage:in-memory-task-store",
+        `In-memory task store attempts to claim explicit task "${taskId}".`
+      );
+
+      const existing = tasks.find((candidate) => candidate.id === taskId);
+      if (!existing) {
+        return null;
+      }
+
+      const goal = goals.find(
+        (candidate) => candidate.id === existing.goalId && candidate.projectId === existing.projectId
+      );
+      if (!goal || goal.status !== "active") {
+        return null;
+      }
+
+      await this.requeueExpiredTasks(existing.projectId, goal.id);
+
+      const task = tasks.find((candidate) => {
+        const availableAt = candidate.availableAt ? new Date(candidate.availableAt).getTime() : 0;
+        return (
+          candidate.id === taskId &&
+          candidate.projectId === existing.projectId &&
+          candidate.goalId === goal.id &&
+          candidate.status === "available" &&
+          availableAt <= Date.now() &&
+          hasSatisfiedDependencies(candidate, tasks)
+        );
+      });
+
+      if (!task) {
+        return null;
+      }
+
+      const updatedAt = currentTimestamp();
+      task.status = "assigned";
+      task.assignedTo = agentName;
+      task.assignedAt = updatedAt;
+      task.leaseExpiresAt = new Date(Date.now() + options.leaseDurationSeconds * 1000).toISOString();
+      task.updatedAt = updatedAt;
+      task.blockedReason = null;
+      task.lastError = null;
+
+      events.push(
+        createEvent(task, "task_claimed", "agent", agentName, {
+          taskHint: options.taskHint ?? null,
+          capabilities: options.capabilities ?? [],
+          leaseDurationSeconds: options.leaseDurationSeconds
+        })
+      );
+
+      return cloneTask(task) as ClaimedTask;
+    },
     async getTaskById(taskId: string): Promise<TaskRecord | null> {
       const task = tasks.find((candidate) => candidate.id === taskId);
       return task ? cloneTask(task) : null;
