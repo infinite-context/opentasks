@@ -16,6 +16,7 @@ import { createTaskListManager } from "./system/task-list-manager";
 import { createTaskOrchestrator } from "./system/task-orchestrator";
 import { createTaskService } from "./system/task-service";
 import { createTaskQueryService } from "./system/task-query-service";
+import { createTaskResolutionService } from "./system/task-resolution-service";
 import { createValidationService } from "./system/validation-service";
 import { createHttpTransport } from "./transport/http";
 import { createMcpTransport } from "./transport/mcp";
@@ -98,6 +99,11 @@ export function createApp(overrides?: Partial<AppEnv>): App {
     logger,
     taskStore
   });
+  const taskResolutionService = createTaskResolutionService({
+    logger,
+    taskQueryService,
+    taskStore
+  });
   const dashboardQueryService = createDashboardQueryService({
     logger,
     taskStore
@@ -112,6 +118,7 @@ export function createApp(overrides?: Partial<AppEnv>): App {
         taskService,
         executionLoop,
         taskQueryService,
+        taskResolutionService,
         dashboardQueryService
       })
     : null;

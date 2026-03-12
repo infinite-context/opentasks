@@ -278,6 +278,12 @@ export const taskSearchResultDtoSchema = z.object({
   results: z.array(taskSearchHitDtoSchema)
 });
 
+export const taskQueryResolutionDtoSchema = z.object({
+  query: z.string().min(1),
+  recommendedTaskId: z.string().min(1).nullable(),
+  recommendedTask: taskRecordSchema.nullable()
+});
+
 export const taskClaimResultDtoSchema = z.object({
   task: claimedTaskSchema.nullable()
 });

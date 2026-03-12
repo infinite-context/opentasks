@@ -171,6 +171,12 @@ export interface TaskSearchResultDto {
   results: TaskSearchHitDto[];
 }
 
+export interface TaskQueryResolutionDto {
+  query: string;
+  recommendedTaskId: string | null;
+  recommendedTask: TaskRecord | null;
+}
+
 export interface TaskClaimResultDto {
   task: ClaimedTask | null;
 }

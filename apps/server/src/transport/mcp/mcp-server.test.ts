@@ -37,6 +37,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
 
     assert.ok(toolNames.includes("list_tasks"));
     assert.ok(toolNames.includes("search_tasks"));
+    assert.ok(toolNames.includes("recommend_task_for_query"));
     assert.ok(toolNames.includes("get_project_overview"));
     assert.ok(toolNames.includes("request_task"));
     assert.ok(toolNames.includes("claim_task_by_id"));
@@ -107,6 +108,24 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     assert.ok(taskSearch.results.every((result) => typeof result.claimable === "boolean"));
     assert.ok(taskSearch.results.every((result) => Array.isArray(result.nextClaimableDependencyTaskIds)));
     assert.ok(taskSearch.results.every((result) => Array.isArray(result.unresolvedUpstreamDependencies)));
+
+    const recommendationResult = await client.callTool({
+      name: "recommend_task_for_query",
+      arguments: {
+        projectId: "demo-project",
+        query: "follow-up",
+        limit: 10
+      }
+    });
+    const recommendation = recommendationResult.structuredContent as {
+      query: string;
+      recommendedTaskId: string | null;
+      recommendedTask: { id: string; title: string } | null;
+    };
+
+    assert.equal(recommendation.query, "follow-up");
+    assert.ok(recommendation.recommendedTaskId);
+    assert.ok(recommendation.recommendedTask);
 
     const explicitClaimResult = await client.callTool({
       name: "claim_task_by_id",

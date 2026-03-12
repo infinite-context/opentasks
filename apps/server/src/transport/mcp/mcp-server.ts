@@ -26,6 +26,7 @@ import type { GoalService } from "../../system/goal-service";
 import type { ProjectService } from "../../system/project-service";
 import type { TaskService } from "../../system/task-service";
 import type { TaskQueryService } from "../../system/task-query-service";
+import type { TaskResolutionService } from "../../system/task-resolution-service";
 import type { McpTransport } from "./types";
 
 interface CreateMcpTransportParams {
@@ -37,6 +38,7 @@ interface CreateMcpTransportParams {
   taskService: TaskService;
   executionLoop: ExecutionLoop;
   taskQueryService: TaskQueryService;
+  taskResolutionService: TaskResolutionService;
   dashboardQueryService: DashboardQueryService;
 }
 
@@ -62,6 +64,7 @@ export function createMcpTransport({
   taskService,
   executionLoop,
   taskQueryService,
+  taskResolutionService,
   dashboardQueryService
 }: CreateMcpTransportParams): McpTransport {
   const server = new McpServer(
@@ -184,6 +187,32 @@ export function createMcpTransport({
           {
             type: "text" as const,
             text: `Found ${result.results.length} task(s) matching \"${result.query}\".`
+          }
+        ],
+        structuredContent: { ...result }
+      };
+    }
+  );
+
+  server.registerTool(
+    "recommend_task_for_query",
+    {
+      title: "Recommend Task For Query",
+      description:
+        "Recommend the best executable task for a text query without claiming it.",
+      inputSchema: taskSearchQueryShape
+    },
+    async (args) => {
+      const result = await taskResolutionService.recommendTaskForQuery(args);
+      const summary = result.recommendedTask
+        ? `Recommended task ${result.recommendedTask.id}: ${result.recommendedTask.title}.`
+        : `No claimable task recommendation found for "${result.query}".`;
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: summary
           }
         ],
         structuredContent: { ...result }
