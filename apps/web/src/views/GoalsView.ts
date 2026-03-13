@@ -3,6 +3,7 @@ import { renderTaskRow } from "../components";
 import { escapeHtml } from "../utils";
 
 export interface GoalsViewProps {
+  hasProject: boolean;
   goals: GoalRecord[];
   tasks: TaskRecord[];
   selectedGoalId: string;
@@ -12,7 +13,7 @@ export interface GoalsViewProps {
 }
 
 export function renderGoalsView(props: GoalsViewProps): string {
-  const { goals, tasks, selectedGoalId, selectedTaskId, errorMessage, isLoading } = props;
+  const { hasProject, goals, tasks, selectedGoalId, selectedTaskId, errorMessage, isLoading } = props;
   const selectedGoal = goals.find((goal) => goal.id === selectedGoalId) ?? goals[0] ?? null;
   const selectedGoalTasks = selectedGoal
     ? tasks.filter((task) => task.goalId === selectedGoal.id)
@@ -38,6 +39,8 @@ export function renderGoalsView(props: GoalsViewProps): string {
           ${
             isLoading
               ? `<p class="detail-summary">Loading goals for the active project...</p>`
+              : !hasProject
+                ? `<p class="detail-summary">There is no project yet. Create a project to start defining goals.</p>`
               : goals.length === 0
                 ? `<p class="detail-summary">No goals have been defined for this project yet.</p>`
                 : `
@@ -88,7 +91,9 @@ export function renderGoalsView(props: GoalsViewProps): string {
           </div>
 
           ${
-            selectedGoal
+            !hasProject
+              ? `<p class="detail-summary">Select or create a project to inspect its goals and task coverage.</p>`
+              : selectedGoal
               ? `
                 <div class="detail-grid">
                   <div>

@@ -71,6 +71,12 @@ test("validation service rejects project creation when working directory does no
 
 test("validation service returns known projects when a project is missing", async () => {
   const store = createInMemoryTaskStore({ logger });
+  await store.createProject({
+    key: "known-project",
+    name: "Known Project",
+    description: "A project for testing",
+    workingDirectory: "."
+  });
   const validationService = createValidationService({ logger, store });
 
   const result = await validationService.ensureProject("missing-project");

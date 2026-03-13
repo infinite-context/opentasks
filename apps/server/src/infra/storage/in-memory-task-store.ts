@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
-import { cwd as getCwd } from "node:process";
 import type { Logger } from "../logging";
+import { pathsEqual } from "../path-utils";
+import { resolveProjectFromRef } from "./project-ref-resolver";
 import type {
   ClaimedTask,
   CreateGoalInput,
@@ -18,7 +18,8 @@ import type {
   TaskQueryFilters,
   TaskRecord,
   TaskRelease,
-  UpdateGoalInput
+  UpdateGoalInput,
+  UpdateProjectInput
 } from "@opentasks/contracts";
 import type { CoordinationStore } from "./task-store";
 
@@ -34,110 +35,6 @@ function currentTimestamp(): string {
 function createLocalId(prefix: string): string {
   return `${prefix}_${randomUUID().replace(/-/g, "")}`;
 }
-
-function createProjectSeed(
-  key: string,
-  name: string,
-  description: string,
-  workingDirectory: string
-): ProjectRecord {
-  const now = currentTimestamp();
-
-  return {
-    id: createLocalId("project"),
-    key,
-    name,
-    description,
-    workingDirectory,
-    createdAt: now,
-    updatedAt: now
-  };
-}
-
-function createGoalSeed(projectId: string, key: string, name: string, priority: GoalRecord["priority"]): GoalRecord {
-  const now = currentTimestamp();
-
-  return {
-    id: createLocalId("goal"),
-    projectId,
-    key,
-    name,
-    description: "",
-    status: "active",
-    priority,
-    metadata: {},
-    createdAt: now,
-    updatedAt: now
-  };
-}
-
-function createTaskSeed(
-  projectId: string,
-  goalId: string,
-  title: string,
-  overrides: Partial<TaskRecord> = {}
-): TaskRecord {
-  const now = currentTimestamp();
-
-  return {
-    id: createLocalId("task"),
-    createdAt: now,
-    updatedAt: now,
-    projectId,
-    goalId,
-    title,
-    description: "",
-    status: "available",
-    priority: "P2",
-    availableAt: now,
-    assignedTo: null,
-    assignedAt: null,
-    leaseExpiresAt: null,
-    startedAt: null,
-    completedAt: null,
-    failedAt: null,
-    blockedReason: null,
-    lastError: null,
-    source: "seeded",
-    metadata: {},
-    dependencyIds: [],
-    ...overrides
-  };
-}
-
-const defaultWorkingDir = resolve(getCwd(), ".");
-const demoProject = createProjectSeed(
-  "demo-project",
-  "Demo Project",
-  "Demo project for exploring OpenTasks.",
-  defaultWorkingDir
-);
-const otherProject = createProjectSeed(
-  "other-project",
-  "Other Project",
-  "Another project for testing multi-project workflows.",
-  defaultWorkingDir
-);
-const demoGoal = createGoalSeed(demoProject.id, "initial-goal", "Initial Goal", "P0");
-const otherGoal = createGoalSeed(otherProject.id, "initial-goal", "Initial Goal", "P1");
-const defaultProjects: ProjectRecord[] = [demoProject, otherProject];
-const defaultGoals: GoalRecord[] = [demoGoal, otherGoal];
-
-const seededPrimaryTask = createTaskSeed(demoProject.id, demoGoal.id, "Hydrate the next task with reusable context", {
-  priority: "P0",
-  description: "Seeded task used by the current execution path."
-});
-
-const seededDependentTask = createTaskSeed(demoProject.id, demoGoal.id, "Prepare a follow-up task for the same project", {
-  priority: "P1",
-  dependencyIds: [seededPrimaryTask.id]
-});
-
-const seededOtherProjectTask = createTaskSeed(otherProject.id, otherGoal.id, "Unrelated task for another project", {
-  priority: "P2"
-});
-
-const defaultTasks: TaskRecord[] = [seededPrimaryTask, seededDependentTask, seededOtherProjectTask];
 
 function cloneProject(project: ProjectRecord): ProjectRecord {
   return { ...project };
@@ -196,7 +93,7 @@ function resolveProjectId(projects: ProjectRecord[], projectRef?: string): strin
     return null;
   }
 
-  const project = projects.find((candidate) => candidate.id === projectRef || candidate.key === projectRef);
+  const project = resolveProjectFromRef(projects, projectRef);
   return project?.id ?? null;
 }
 
@@ -207,10 +104,10 @@ function compareTaskPriority(left: TaskRecord, right: TaskRecord): number {
 
 export function createInMemoryTaskStore({
   logger,
-  initialTasks = defaultTasks
+  initialTasks = []
 }: CreateInMemoryTaskStoreParams): CoordinationStore {
-  const projects = defaultProjects.map(cloneProject);
-  const goals = defaultGoals.map(cloneGoal);
+  const projects: ProjectRecord[] = [];
+  const goals: GoalRecord[] = [];
   const tasks = initialTasks.map(cloneTask);
   const events: TaskEvent[] = tasks.flatMap((task) => [
     createEvent(task, "task_created", "system", null),
@@ -239,7 +136,20 @@ export function createInMemoryTaskStore({
       return cloneProject(project);
     },
     async getProject(projectRef: string): Promise<ProjectRecord | null> {
-      const project = projects.find((candidate) => candidate.id === projectRef || candidate.key === projectRef);
+      const project = resolveProjectFromRef(projects, projectRef);
+      return project ? cloneProject(project) : null;
+    },
+    async updateProject(input: UpdateProjectInput): Promise<ProjectRecord | null> {
+      const project = resolveProjectFromRef(projects, input.projectId);
+      if (!project) return null;
+      project.description = input.description;
+      project.updatedAt = currentTimestamp();
+      return cloneProject(project);
+    },
+    async getProjectByWorkingDirectory(workingDirectory: string): Promise<ProjectRecord | null> {
+      const project = projects.find(
+        (candidate) => candidate.workingDirectory && pathsEqual(candidate.workingDirectory, workingDirectory)
+      );
       return project ? cloneProject(project) : null;
     },
     async listProjects(limit?: number): Promise<ProjectRecord[]> {

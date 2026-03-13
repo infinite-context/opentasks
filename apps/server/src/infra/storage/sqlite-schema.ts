@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
-import { cwd } from "node:process";
 import type { Logger } from "../logging";
 import type { Database } from "better-sqlite3";
 
@@ -89,116 +87,52 @@ export function applySqliteSchema(db: Database, logger: Logger): void {
       payload_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS agents (
+      id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL UNIQUE,
+      client_name TEXT,
+      client_version TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS mcp_logs (
+      id TEXT PRIMARY KEY,
+      agent_display_name TEXT,
+      tool_name TEXT NOT NULL,
+      args_json TEXT NOT NULL DEFAULT '{}',
+      result_json TEXT,
+      result_status TEXT NOT NULL CHECK (result_status IN ('ok', 'error')),
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   ensureTasksGoalColumn(db);
   ensureProjectDescriptionAndWorkingDir(db, logger);
+  ensureMcpLogsResultJsonColumn(db, logger);
   ensureSqliteIndexes(db);
   backfillProjectGoals(db, logger);
 }
 
-export function seedSqliteDemoData(db: Database, logger: Logger): void {
-  logger.step("storage:sqlite-schema", "Seeding SQLite demo data when the task table is empty.");
-
-  const countRow = db.prepare("SELECT COUNT(*) AS count FROM tasks").get() as { count: number };
-
-  if (countRow.count !== 0) {
-    return;
-  }
-
-  const workingDir = resolve(cwd(), ".");
-  const insertProject = db.prepare(`
-    INSERT INTO projects (id, key, name, description, working_directory)
-    VALUES (?, 'demo-project', 'Demo Project', 'Demo project for exploring OpenTasks.', ?)
-    ON CONFLICT (key) DO UPDATE SET
-      name = excluded.name,
-      description = excluded.description,
-      working_directory = excluded.working_directory,
-      updated_at = datetime('now')
-    RETURNING id
-  `);
-
-  const projectId = generateId("project");
-  insertProject.run(projectId, workingDir);
-
-  const goalId = generateId("goal");
-  db.prepare(`
-    INSERT INTO goals (id, project_id, key, name, description, status, priority, metadata_json)
-    VALUES (?, ?, 'initial-goal', 'Initial Goal', 'Default seeded goal for the demo project.', 'active', 'P0', '{}')
-    ON CONFLICT (project_id, key) DO UPDATE SET
-      name = excluded.name,
-      description = excluded.description,
-      status = excluded.status,
-      priority = excluded.priority,
-      updated_at = datetime('now')
-  `).run(goalId, projectId);
-
-  const insertTask = db.prepare(`
-    INSERT INTO tasks (
-      id,
-      project_id,
-      goal_id,
-      title,
-      description,
-      status,
-      priority,
-      available_at,
-      source
-    )
-    VALUES (?, ?, ?, ?, ?, 'available', ?, datetime('now'), 'seeded')
-  `);
-
-  const firstTaskId = generateId("task");
-  insertTask.run(
-    firstTaskId,
-    projectId,
-    goalId,
-    "Hydrate the next task with reusable context",
-    "Seeded task that verifies the first execution path through the real backend.",
-    "P0"
-  );
-
-  const secondTaskId = generateId("task");
-  insertTask.run(
-    secondTaskId,
-    projectId,
-    goalId,
-    "Prepare a follow-up task for the same project",
-    "Second seeded task that depends on the primary task to verify dependency-aware claiming.",
-    "P1"
-  );
-
-  const thirdTaskId = generateId("task");
-  insertTask.run(
-    thirdTaskId,
-    projectId,
-    goalId,
-    "Document execution path observability requirements",
-    "Third seeded task for broader queue visibility.",
-    "P2"
-  );
-
-  db.prepare(`
-    INSERT INTO task_dependencies (task_id, depends_on_task_id)
-    VALUES (?, ?)
-  `).run(secondTaskId, firstTaskId);
-
-  const insertEvent = db.prepare(`
-    INSERT INTO task_events (id, task_id, project_id, event_type, actor_type, payload_json)
-    VALUES (?, ?, ?, ?, 'system', '{}')
-  `);
-
-  const events = [
-    { taskId: firstTaskId, type: "task_created" },
-    { taskId: firstTaskId, type: "task_available" },
-    { taskId: secondTaskId, type: "task_created" },
-    { taskId: secondTaskId, type: "task_available" },
-    { taskId: thirdTaskId, type: "task_created" },
-    { taskId: thirdTaskId, type: "task_available" }
-  ];
-
-  for (const event of events) {
-    insertEvent.run(generateId("task_event"), event.taskId, projectId, event.type);
+function ensureAgentsTable(db: Database, logger: Logger): void {
+  const tables = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='agents'"
+  ).get();
+  if (!tables) {
+    db.exec(`
+      CREATE TABLE agents (
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL UNIQUE,
+        client_name TEXT,
+        client_version TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE UNIQUE INDEX idx_agents_display_name ON agents(display_name);
+    `);
+    logger.step("storage:sqlite-schema", "Created agents table.");
   }
 }
 
@@ -223,6 +157,16 @@ function ensureProjectDescriptionAndWorkingDir(db: Database, logger: Logger): vo
   if (!hasWorkingDir) {
     db.exec("ALTER TABLE projects ADD COLUMN working_directory TEXT NOT NULL DEFAULT '';");
     logger.step("storage:sqlite-schema", "Added working_directory column to projects.");
+  }
+}
+
+function ensureMcpLogsResultJsonColumn(db: Database, logger: Logger): void {
+  const columns = db.prepare("PRAGMA table_info(mcp_logs)").all() as Array<{ name: string }>;
+  const hasResultJson = columns.some((c) => c.name === "result_json");
+
+  if (!hasResultJson) {
+    db.exec("ALTER TABLE mcp_logs ADD COLUMN result_json TEXT;");
+    logger.step("storage:sqlite-schema", "Added result_json column to mcp_logs.");
   }
 }
 
@@ -257,6 +201,12 @@ function ensureSqliteIndexes(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_goals_project_status_priority
       ON goals(project_id, status, priority);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_display_name
+      ON agents(display_name);
+
+    CREATE INDEX IF NOT EXISTS idx_mcp_logs_agent_created_at
+      ON mcp_logs(agent_display_name, created_at DESC);
   `);
 }
 

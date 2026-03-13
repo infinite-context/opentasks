@@ -1,6 +1,6 @@
 import type { Logger } from "../../infra/logging";
 import type { ProjectStore } from "../../infra/storage/task-store";
-import type { CreateProjectInput } from "@opentasks/contracts";
+import type { CreateProjectInput, UpdateProjectInput } from "@opentasks/contracts";
 import { okResult } from "../service-result";
 import type { ProjectService } from "./types";
 import type { ValidationService } from "../validation-service";
@@ -28,6 +28,22 @@ export function createProjectService({
       const project = await projectStore.createProject(validatedInput);
       return okResult(`Project "${project.name}" is available for use.`, { project });
     },
+    async updateProject(input: UpdateProjectInput) {
+      const project = await projectStore.getProject(input.projectId);
+      if (!project) {
+        return {
+          status: "project_not_found" as const,
+          message: `Project "${input.projectId}" was not found.`,
+          guidance: ["Use start_session or get_project to find a valid project id."],
+          context: {
+            projects: await projectStore.listProjects(100)
+          }
+        };
+      }
+      logger.step("project-service", `Updating project "${project.key}" description.`);
+      const updated = await projectStore.updateProject(input);
+      return okResult(`Project "${updated!.name}" description updated.`, { project: updated });
+    },
     async getProject(projectRef: string) {
       logger.step("project-service", `Loading project "${projectRef}".`);
       const project = await projectStore.getProject(projectRef);
@@ -36,7 +52,7 @@ export function createProjectService({
         return {
           status: "project_not_found",
           message: `Project "${projectRef}" was not found.`,
-          guidance: ["Create a project with create_project first."],
+          guidance: ["Use start_session to create or find a project for your working directory."],
           context: {
             projects: await projectStore.listProjects(100)
           }

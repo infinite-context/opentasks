@@ -25,7 +25,9 @@ Databases used for task state and retrievable memory.
 
 The web UI is the browser-facing observability surface for the system.
 
-It visualizes backend task coordination state through HTTP and SSE, and it uses the same canonical project, goal, task, and task event models that the backend uses internally.
+It visualizes backend task coordination state through HTTP and SSE, and it uses the same canonical project, goal, task, task event, agent, and MCP log models that the backend uses internally.
+
+Views include: dashboard (summary and pipeline), goals (goal-scoped task lists), tasks (task detail and lifecycle), projects (project selection and creation), agents (agent list and MCP tool logs per agent), MCP (connection status and configuration), analytics, system health, and settings.
 
 **Important Architectural Note:** The Web UI is intentionally built using Vanilla TypeScript, raw HTML string templates, and Vite. It does not use a modern reactive framework like React or Vue. This is by design to maintain a specific architectural footprint. Do not attempt to rewrite the frontend to a different framework.
 
@@ -47,17 +49,22 @@ Additional providers can be supported through the model provider service.
 
 The MCP server is the agent-facing entry point into the system.
 
-It runs as a long-lived stdio MCP service and exposes project, goal, and task tools to external agents.
+It supports two transports:
 
-These tools currently include project creation and lookup, goal creation and update, goal listing, task creation, orchestrated task request, task lifecycle operations, and task inspection.
+1. **stdio** (default): A long-lived stdio MCP service, typically one process per client. Caller-supplied `agentName` is required for task lifecycle tools.
+2. **HTTP** (Streamable HTTP): Mounted at `/mcp` on the HTTP server when `OPENTASKS_MCP_OVER_HTTP` is enabled. Each connecting client receives a session-bound agent with a generated Docker-style display name (e.g. `quiet-forest`). Task lifecycle tools infer agent identity from the session; no `agentName` parameter is required.
+
+These tools include project creation and lookup, goal creation and update, goal listing, task creation, orchestrated task request, task lifecycle operations, and task inspection.
 
 ### HTTP Server
 
-The HTTP server is the browser-facing transport for project, goal, dashboard, and task inspection flows.
+The HTTP server is the browser-facing transport for project, goal, dashboard, task inspection, agent, and MCP log flows.
 
-It exposes JSON endpoints for project listing and creation, goal listing by project, dashboard snapshots, task lists, task detail, and supporting browser metadata and file-system flows. It also exposes an SSE stream for live dashboard refresh.
+It exposes JSON endpoints for project listing and creation, goal listing by project, dashboard snapshots, task lists, task detail, agent list, MCP logs by agent, and supporting browser metadata and file-system flows. It also exposes an SSE stream for live dashboard refresh.
 
-It exposes the project-aware read endpoints needed by the web UI, including project selection, project-overview reads, goal inspection, dashboard reads, and task inspection flows.
+When MCP over HTTP is enabled, it mounts the MCP handler at `/mcp` (POST for requests, GET for streaming, DELETE for session cleanup). The HTTP server delegates MCP handling to the MCP HTTP handler so browser and agent traffic share the same port.
+
+It exposes the project-aware read endpoints needed by the web UI, including project selection, project-overview reads, goal inspection, dashboard reads, task inspection, agents, and MCP logs.
 
 It is built using Fastify and utilizes `fastify-type-provider-zod` for native request validation against the shared `@opentasks/contracts` schemas.
 
@@ -78,6 +85,18 @@ It verifies project existence, goal existence, project-goal ownership, and task-
 The project service owns project creation and lookup behavior.
 
 It is the application-facing layer above project persistence and is responsible for returning standardized project-oriented responses and project list responses for MCP consumers.
+
+### Session Service
+
+The session service handles session startup and project resolution by working directory.
+
+It implements `start_session(workingDirectory)`: resolves the path, looks up an existing project by exact or parent-directory match, and creates a new project if none is found. It derives project key and name from the directory name and returns the project with open goals. This is the entry point agents use before creating goals or requesting tasks.
+
+### Agent Service
+
+The agent service manages agent identity and lifecycle.
+
+It creates or reuses agents by client name, assigns Docker-style display names (e.g. `quiet-forest`) for HTTP MCP sessions, and maintains last-seen timestamps. The agent store (SQLite or in-memory) persists agent records. Agent identity is inferred from the MCP session when running over HTTP, so task lifecycle tools do not require an explicit `agentName` parameter in that mode.
 
 ### Goal Service
 
@@ -103,7 +122,13 @@ Its active selection path is SQLite-backed and still uses an atomic goal-scoped 
 
 The task query service provides read-oriented task list and task detail responses for browser consumers.
 
-It assembles canonical task records and their related lifecycle events without embedding transport logic.
+It assembles canonical task records and their related lifecycle events without embedding transport logic. It supports search and filtering for task discovery.
+
+### Task Resolution Service
+
+The task resolution service provides query-based task recommendation.
+
+It implements `recommend_task_for_query`: searches tasks by text query, returns a claimable match when available, or suggests the next dependency-ready task when the queried task is blocked. Used by MCP consumers to find work without claiming it first.
 
 ### Dashboard Query Service
 
@@ -151,9 +176,13 @@ It isolates provider-specific logic so additional model backends can be added la
 
 ### SQLite Coordination Database
 
-The SQLite coordination database stores project state, goal state, task state, dependency data, assignment state, task events, and task availability information.
+The SQLite coordination database stores project state, goal state, task state, dependency data, assignment state, task events, task availability information, agent records, and MCP tool invocation logs.
 
-It is the backing store queried by the project, goal, validation, and task services. It uses Drizzle ORM for type-safe query building and schema management, replacing brittle raw SQL strings.
+The `agents` table stores session-bound agent identities with a unique Docker-style display name (e.g. `quiet-forest`), used when MCP runs over HTTP. The agent store (SQLite or in-memory) backs the agent service.
+
+The `mcp_logs` table records each MCP tool invocation: agent, tool name, arguments, result status, and optional error message. The MCP log store (SQLite or in-memory) backs observability for agent activity in the web UI.
+
+It is the backing store queried by the project, goal, validation, task, agent, and session services. It uses Drizzle ORM for type-safe query building and schema management, replacing brittle raw SQL strings.
 
 It is also the source of truth for persisted object identifiers. Project, goal, task, and task event IDs use prefixed identifiers such as `project_<id>`, `goal_<id>`, `task_<id>`, and `task_event_<id>`.
 
@@ -187,12 +216,13 @@ The MCP surface also supports additional lifecycle operations after claiming a t
 3. The external agent completes, fails, or releases the task.
 4. Each transition is persisted and recorded in the task event log.
 
-The MCP surface also supports project and goal management operations used before task execution begins:
+The MCP surface also supports session and project management operations used before task execution begins:
 
-1. The external agent can create a project.
-2. The external agent can read a project or list projects.
+1. The external agent calls `start_session(workingDirectory)` first to create or find a project by path (exact or parent-directory match).
+2. The external agent can create a project, read a project, or list projects.
 3. The external agent can create, update, and list goals for a project.
 4. Task creation requires an existing project-goal pair and is rejected with standardized guidance when that context is missing.
+5. The task resolution service supports `recommend_task_for_query` for search-based task discovery without claiming.
 
 ### Learning loop
 
@@ -206,19 +236,19 @@ The browser read path is the browser-facing observability flow.
 
 1. The web UI selects an active project and requests project-scoped data through the HTTP server.
 2. The HTTP server validates query parameters with shared schemas.
-3. The HTTP server calls the project service, goal service, dashboard query service, or task query service depending on the view being loaded.
-4. The service layer loads canonical project, goal, task, and event data from the coordination store.
+3. The HTTP server calls the project service, goal service, dashboard query service, task query service, agent service, or MCP log store depending on the view being loaded.
+4. The service layer loads canonical project, goal, task, event, agent, and MCP log data from the coordination store.
 5. Aggregate or list DTOs are built around canonical entities.
 6. The response is returned to the browser as JSON.
 7. The SSE endpoint periodically emits fresh dashboard snapshot events for live updates.
 
-The browser UI uses this read path to maintain its active project context, render project and goal pages, and keep project-scoped dashboard state synchronized with live backend data.
+The browser UI uses this read path to maintain its active project context, render project, goal, task, agent, and MCP views, and keep project-scoped dashboard state synchronized with live backend data.
 
 ## System flow
 
-The system currently operates through an active goal-driven task coordination path and an active browser read path. The task path handles project and goal validation, goal selection, dependency-aware claiming, lease management, lifecycle transitions, and delivery through MCP. The browser path handles project selection, project and goal inspection, and dashboard/task observability through HTTP and SSE over the same coordination store. The retrieval, indexing, and model-backed learning components remain deferred for a later phase.
+The system currently operates through an active goal-driven task coordination path and an active browser read path. The task path handles session startup (project resolution by working directory), project and goal validation, goal selection, dependency-aware claiming, lease management, lifecycle transitions, and delivery through MCP (stdio or HTTP). The browser path handles project selection, project and goal inspection, dashboard/task observability, agent list, and MCP tool logs through HTTP and SSE over the same coordination store. The retrieval, indexing, and model-backed learning components remain deferred for a later phase.
 
-The system also now exposes standardized operation outcomes for mutation-style workflows so transport adapters can render actionable guidance without owning business rules themselves.
+The system exposes standardized operation outcomes for mutation-style workflows so transport adapters can render actionable guidance without owning business rules themselves.
 
 ## Shared contracts
 

@@ -4,6 +4,7 @@ import { escapeHtml } from "../utils";
 
 export interface ProjectViewProps {
   project: ProjectRecord | null;
+  hasProject: boolean;
   goals: GoalRecord[];
   tasks: TaskRecord[];
   selectedTaskId: string;
@@ -12,7 +13,7 @@ export interface ProjectViewProps {
 }
 
 export function renderProjectView(props: ProjectViewProps): string {
-  const { project, goals, tasks, selectedTaskId, errorMessage, isLoading } = props;
+  const { project, hasProject, goals, tasks, selectedTaskId, errorMessage, isLoading } = props;
 
   const totalTasks = tasks.length;
   const goalsWithTasks = goals.map((goal) => ({
@@ -26,7 +27,7 @@ export function renderProjectView(props: ProjectViewProps): string {
         <div class="card__header">
           <div>
             <div class="eyebrow">Current project</div>
-            <h2>${project ? escapeHtml(project.name) : "Loading…"}</h2>
+            <h2>${project ? escapeHtml(project.name) : hasProject ? "Loading..." : "No project selected"}</h2>
             ${project ? `<div class="project-view__key">${escapeHtml(project.key)}</div>` : ""}
           </div>
         </div>
@@ -58,6 +59,8 @@ export function renderProjectView(props: ProjectViewProps): string {
       ${
         isLoading
           ? `<p class="detail-summary">Loading project structure…</p>`
+          : !hasProject
+            ? `<p class="detail-summary">There is no project yet. Create a project to start organizing goals and tasks.</p>`
           : goals.length === 0
             ? `<p class="detail-summary">No goals have been defined for this project yet.</p>`
             : `

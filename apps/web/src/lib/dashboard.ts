@@ -30,6 +30,10 @@ export function buildMetaUrl(): string {
   return buildApiUrl("/api/meta");
 }
 
+export function buildMcpUrl(): string {
+  return buildApiUrl("/mcp");
+}
+
 export function buildValidatePathUrl(path: string): string {
   return buildApiUrl("/api/validate-path", { path });
 }
@@ -52,6 +56,16 @@ export function buildProjectCreateUrl(): string {
 
 export function buildGoalListUrl(projectId: string): string {
   return buildApiUrl("/api/goals", { projectId });
+}
+
+export function buildAgentsUrl(limit?: number): string {
+  return buildApiUrl("/api/agents", limit ? { limit: String(limit) } : undefined);
+}
+
+export function buildMcpLogsUrl(agentDisplayName: string, limit?: number): string {
+  const params: Record<string, string> = { agentDisplayName };
+  if (limit) params.limit = String(limit);
+  return buildApiUrl("/api/mcp-logs", params);
 }
 
 export function buildDashboardApiUrl(projectId: string): string {

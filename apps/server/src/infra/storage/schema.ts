@@ -1,5 +1,18 @@
-import { sqliteTable, text, integer, primaryKey, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, primaryKey, index } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+
+export const agents = sqliteTable("agents", {
+  id: text("id").primaryKey(),
+  displayName: text("display_name").notNull().unique(),
+  clientName: text("client_name"),
+  clientVersion: text("client_version"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  lastSeenAt: text("last_seen_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => {
+  return {
+    displayNameIdx: index("idx_agents_display_name").on(table.displayName),
+  };
+});
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),

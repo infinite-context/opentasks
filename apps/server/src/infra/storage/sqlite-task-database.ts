@@ -20,13 +20,15 @@ import type {
   TaskFailure,
   TaskQueryFilters,
   TaskRelease,
-  UpdateGoalInput
+  UpdateGoalInput,
+  UpdateProjectInput
 } from "@opentasks/contracts";
 import type { CoordinationStore } from "./task-store";
 import type { Database } from "better-sqlite3";
+import { pathsEqual } from "../path-utils";
 import { generateId } from "./sqlite-schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { eq, or, and, lte, asc, desc, inArray, sql } from "drizzle-orm";
+import { eq, ne, or, and, lte, asc, desc, inArray, sql } from "drizzle-orm";
 import * as schema from "./schema";
 
 interface CreateSqliteTaskDatabaseParams {
@@ -42,7 +44,7 @@ export function createSqliteTaskDatabase({
 
   return {
     async createProject(input: CreateProjectInput): Promise<ProjectRecord> {
-      const existing = getProjectByIdOrKeyFromDb(db, input.key);
+      const existing = getProjectByRefFromDb(db, input.key);
       if (existing) {
         return existing;
       }
@@ -56,10 +58,30 @@ export function createSqliteTaskDatabase({
         workingDirectory: input.workingDirectory
       }).run();
 
-      return getProjectByIdOrKeyFromDb(db, projectId)!;
+      return getProjectByRefFromDb(db, projectId)!;
     },
-    async getProject(projectId: string): Promise<ProjectRecord | null> {
-      return getProjectByIdOrKeyFromDb(db, projectId);
+    async getProject(projectRef: string): Promise<ProjectRecord | null> {
+      return getProjectByRefFromDb(db, projectRef);
+    },
+    async updateProject(input: UpdateProjectInput): Promise<ProjectRecord | null> {
+      const project = getProjectByRefFromDb(db, input.projectId);
+      if (!project) return null;
+      db.update(schema.projects)
+        .set({
+          description: input.description,
+          updatedAt: sql`datetime('now')` as unknown as string
+        })
+        .where(eq(schema.projects.id, project.id))
+        .run();
+      return getProjectByIdOrKeyFromDb(db, project.id);
+    },
+    async getProjectByWorkingDirectory(workingDirectory: string): Promise<ProjectRecord | null> {
+      const all = db.select()
+        .from(schema.projects)
+        .where(ne(schema.projects.workingDirectory, ""))
+        .all()
+        .map(mapProjectRow);
+      return all.find((p) => pathsEqual(p.workingDirectory, workingDirectory)) ?? null;
     },
     async listProjects(limit = 100): Promise<ProjectRecord[]> {
       return db.select()
@@ -71,7 +93,7 @@ export function createSqliteTaskDatabase({
     },
     async createGoal(input: CreateGoalInput): Promise<GoalRecord | null> {
       return sqliteDb.transaction(() => {
-        const project = getProjectByIdOrKeyFromDb(db, input.projectId);
+        const project = getProjectByRefFromDb(db, input.projectId);
         if (!project) {
           return null;
         }
@@ -156,7 +178,7 @@ export function createSqliteTaskDatabase({
     },
     async createTask(input: CreateTaskInput): Promise<TaskRecord | null> {
       return sqliteDb.transaction(() => {
-        const project = getProjectByIdOrKeyFromDb(db, input.projectId);
+        const project = getProjectByRefFromDb(db, input.projectId);
         if (!project) {
           logger.step(
             "storage:sqlite-task-db",
@@ -690,7 +712,7 @@ function getGoalByProjectAndKeyFromDb(db: any, projectId: string, goalKey: strin
 }
 
 function resolveProjectIdFromDb(db: any, projectRef: string): string | null {
-  const project = getProjectByIdOrKeyFromDb(db, projectRef);
+  const project = getProjectByRefFromDb(db, projectRef);
   return project?.id ?? null;
 }
 
@@ -704,6 +726,38 @@ function getProjectByIdOrKeyFromDb(db: any, projectRef: string): ProjectRecord |
   if (!row) return null;
 
   return mapProjectRow(row);
+}
+
+function getProjectByNameFromDb(db: any, name: string): ProjectRecord | null {
+  const projects: ProjectRecord[] = db.select()
+    .from(schema.projects)
+    .all()
+    .map((r: any) => mapProjectRow(r));
+  const lower = name.toLowerCase();
+  return projects.find((p) => p.name.toLowerCase() === lower) ?? null;
+}
+
+function getProjectByWorkingDirectoryFromDb(db: any, workingDirectory: string): ProjectRecord | null {
+  const all = db.select()
+    .from(schema.projects)
+    .where(ne(schema.projects.workingDirectory, ""))
+    .all()
+    .map(mapProjectRow);
+  return all.find((p) => pathsEqual(p.workingDirectory, workingDirectory)) ?? null;
+}
+
+/**
+ * Resolves project by id, key, name, or workingDirectory.
+ */
+function getProjectByRefFromDb(db: any, projectRef: string): ProjectRecord | null {
+  const trimmed = projectRef?.trim();
+  if (!trimmed) return null;
+
+  return (
+    getProjectByIdOrKeyFromDb(db, trimmed) ??
+    getProjectByWorkingDirectoryFromDb(db, trimmed) ??
+    getProjectByNameFromDb(db, trimmed)
+  );
 }
 
 function mapProjectRow(row: any): ProjectRecord {
