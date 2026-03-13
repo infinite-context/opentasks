@@ -46,21 +46,21 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     assert.ok(toolNames.includes("fail_task"));
     assert.ok(toolNames.includes("release_task"));
     assert.ok(toolNames.includes("get_task"));
+    assert.ok(toolNames.includes("start_session"));
+    assert.ok(toolNames.includes("update_project"));
+    assert.ok(!toolNames.includes("create_project"));
 
-    const createProjectResult = await client.callTool({
-      name: "create_project",
+    const startSessionResult = await client.callTool({
+      name: "start_session",
       arguments: {
-        key: "demo-project",
-        name: "Demo Project",
-        description: "Demo project for testing",
         workingDirectory: "."
       }
     });
-    const createdProject = createProjectResult.structuredContent as {
+    const createdProject = startSessionResult.structuredContent as {
       project: { id: string; key: string };
     };
     assert.ok(createdProject.project);
-    assert.equal(createdProject.project.key, "demo-project");
+    assert.ok(createdProject.project.id);
 
     const createGoalResult = await client.callTool({
       name: "create_goal",
@@ -101,7 +101,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     const projectResult = await client.callTool({
       name: "get_project",
       arguments: {
-        projectId: "demo-project"
+        projectId: createdProject.project.id
       }
     });
     const project = projectResult.structuredContent as {
@@ -109,12 +109,12 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     };
 
     assert.ok(project.project);
-    assert.equal(project.project.key, "demo-project");
+    assert.equal(project.project.id, createdProject.project.id);
 
     const taskListResult = await client.callTool({
       name: "list_tasks",
       arguments: {
-        projectId: "demo-project",
+        projectId: createdProject.project.id,
         limit: 10
       }
     });
@@ -128,7 +128,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     const taskSearchResult = await client.callTool({
       name: "search_tasks",
       arguments: {
-        projectId: "demo-project",
+        projectId: createdProject.project.id,
         query: "hydrate context",
         limit: 10
       }
@@ -162,7 +162,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     const recommendationResult = await client.callTool({
       name: "recommend_task_for_query",
       arguments: {
-        projectId: "demo-project",
+        projectId: createdProject.project.id,
         query: "follow-up",
         limit: 10
       }
@@ -197,7 +197,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     const overviewResult = await client.callTool({
       name: "get_project_overview",
       arguments: {
-        projectId: "demo-project"
+        projectId: createdProject.project.id
       }
     });
     const overview = overviewResult.structuredContent as {
@@ -207,7 +207,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     };
 
     assert.ok(overview.project);
-    assert.equal(overview.project.key, "demo-project");
+    assert.equal(overview.project.id, createdProject.project.id);
     assert.ok(overview.tasks.every((task) => task.projectId === overview.project?.id));
     assert.ok(overview.summary.totalTasks >= overview.tasks.length);
 

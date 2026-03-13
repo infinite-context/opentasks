@@ -76,7 +76,7 @@ export function createValidationService({
       return issueResult(
         "project_not_found",
         `Project "${projectRef}" was not found.`,
-        ["Create a project with create_project before creating or requesting goals and tasks."],
+        ["Use start_session to create or find a project before creating or requesting goals and tasks."],
         {
           projects: await store.listProjects(100)
         }

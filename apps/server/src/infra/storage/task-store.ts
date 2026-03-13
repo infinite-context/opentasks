@@ -14,12 +14,15 @@ import type {
   TaskFailure,
   TaskQueryFilters,
   TaskRelease,
-  UpdateGoalInput
+  UpdateGoalInput,
+  UpdateProjectInput
 } from "@opentasks/contracts";
 
 export interface ProjectStore {
   createProject(input: CreateProjectInput): Promise<ProjectRecord>;
+  updateProject(input: UpdateProjectInput): Promise<ProjectRecord | null>;
   getProject(projectId: string): Promise<ProjectRecord | null>;
+  getProjectByWorkingDirectory(workingDirectory: string): Promise<ProjectRecord | null>;
   listProjects(limit?: number): Promise<ProjectRecord[]>;
 }
 

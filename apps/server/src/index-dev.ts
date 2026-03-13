@@ -1,7 +1,7 @@
 import { createApp } from "./app";
 
 async function main(): Promise<void> {
-  const app = createApp({ mcpEnabled: false });
+  const app = createApp();
   await app.run();
 }
 

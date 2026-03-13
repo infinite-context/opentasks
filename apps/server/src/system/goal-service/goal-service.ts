@@ -31,7 +31,7 @@ export function createGoalService({
         return issueResult(
           "project_not_found",
           `Project "${input.projectId}" was not found.`,
-          ["Create a project with create_project first."]
+          ["Use start_session to create or find a project first."]
         );
       }
 

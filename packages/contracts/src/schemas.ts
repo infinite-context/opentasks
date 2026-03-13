@@ -119,6 +119,11 @@ export const createProjectInputSchema = z.object({
   workingDirectory: z.string().min(1)
 });
 
+export const updateProjectInputSchema = z.object({
+  projectId: z.string().min(1),
+  description: z.string().min(1)
+});
+
 export const projectListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().optional()
 });
@@ -147,7 +152,7 @@ export const goalListQuerySchema = z.object({
 });
 
 export const taskRequestSchema = z.object({
-  agentName: z.string().min(1),
+  agentName: z.string().min(1).optional(),
   projectId: z.string().min(1),
   taskHint: z.string().min(1).optional(),
   capabilities: z.array(z.string().min(1)).optional(),
@@ -191,7 +196,7 @@ export const taskSearchQuerySchema = z.object({
 
 export const taskActionSchema = z.object({
   taskId: z.string().min(1),
-  agentName: z.string().min(1)
+  agentName: z.string().min(1).optional()
 });
 
 export const taskClaimByIdSchema = taskActionSchema.extend({
@@ -322,6 +327,43 @@ export const dashboardAgentStatusDtoSchema = z.object({
   failedTasks: z.number().int().nonnegative()
 });
 
+export const agentRecordDtoSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().min(1),
+  clientName: z.string().nullable(),
+  clientVersion: z.string().nullable(),
+  createdAt: z.string().min(1),
+  lastSeenAt: z.string().min(1)
+});
+
+export const agentListQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().optional()
+});
+
+export const agentListDtoSchema = z.object({
+  agents: z.array(agentRecordDtoSchema)
+});
+
+export const mcpLogRecordDtoSchema = z.object({
+  id: z.string().min(1),
+  agentDisplayName: z.string().nullable(),
+  toolName: z.string().min(1),
+  argsJson: z.string(),
+  resultJson: z.string().nullable(),
+  resultStatus: z.enum(["ok", "error"]),
+  errorMessage: z.string().nullable(),
+  createdAt: z.string().min(1)
+});
+
+export const mcpLogListQuerySchema = z.object({
+  agentDisplayName: z.string().min(1),
+  limit: z.coerce.number().int().positive().optional()
+});
+
+export const mcpLogListDtoSchema = z.object({
+  logs: z.array(mcpLogRecordDtoSchema)
+});
+
 export const dashboardHealthStateSchema = z.enum(["healthy", "degraded", "warning"]);
 
 export const dashboardHealthItemDtoSchema = z.object({
@@ -348,6 +390,7 @@ export const dashboardStreamEventDtoSchema = z.object({
 
 export const operationStatusSchema = z.enum([
   "ok",
+  "invalid_input",
   "missing_project",
   "missing_goals",
   "project_not_found",
@@ -360,6 +403,7 @@ export const operationStatusSchema = z.enum([
 ]);
 
 export const operationContextDtoSchema = z.object({
+  projectId: z.string().min(1).optional(),
   project: projectRecordSchema.nullable().optional(),
   projects: z.array(projectRecordSchema).optional(),
   goal: goalRecordSchema.nullable().optional(),

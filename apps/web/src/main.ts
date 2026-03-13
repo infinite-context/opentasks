@@ -1,12 +1,16 @@
 import "@fortawesome/fontawesome-free/css/all.min.css";
 import {
+  agentListDtoSchema,
   goalListDtoSchema,
+  mcpLogListDtoSchema,
   projectListDtoSchema,
   projectRecordSchema,
   dashboardSnapshotDtoSchema,
   dashboardStreamEventDtoSchema,
   taskDetailDtoSchema,
   taskListDtoSchema,
+  type AgentRecordDto,
+  type McpLogRecordDto,
   type DashboardSnapshotDto,
   type GoalRecord,
   type ProjectRecord,
@@ -17,13 +21,16 @@ import "./style.css";
 import { renderSidebar, renderTopbar } from "./components";
 import { DEFAULT_PROJECT_ID } from "./config";
 import {
+  buildAgentsUrl,
   buildAnalyticsChartData,
+  buildMcpLogsUrl,
   buildGoalListUrl,
   buildPickFolderUrl,
   buildProjectListUrl,
   buildDashboardApiUrl,
   buildDashboardStreamUrl,
   buildFocusMessage,
+  buildMcpUrl,
   buildMetaUrl,
   buildTaskDetailUrl,
   buildTaskListUrl,
@@ -70,7 +77,14 @@ let dashboardSnapshot: DashboardSnapshotDto | null = null;
 let taskList: TaskRecord[] = [];
 let taskDetailEvents: import("@opentasks/contracts").TaskEvent[] | null = null;
 let selectedAgentName = "";
+let agentList: AgentRecordDto[] = [];
+let agentsViewLoading = false;
+let agentsViewErrorMessage = "";
+let agentLogs: McpLogRecordDto[] = [];
+let agentLogsLoading = false;
+let agentLogsErrorMessage = "";
 let connectionState: ConnectionState = "connecting";
+let mcpConnected = false;
 let errorMessage = "";
 let tasksViewErrorMessage = "";
 let goalsViewErrorMessage = "";
@@ -78,7 +92,6 @@ let isLoading = true;
 let tasksViewLoading = false;
 let goalsViewLoading = false;
 let dashboardStream: EventSource | null = null;
-let mcpProjectPath: string | null = null;
 let mcpErrorMessage = "";
 let mcpLoading = false;
 let mcpConfigJson = "";
@@ -116,6 +129,7 @@ async function loadProjects(): Promise<void> {
 
     const dto = projectListDtoSchema.parse(await response.json());
     projects = dto.projects;
+    mcpConnected = true;
 
     if (
       projects.length > 0 &&
@@ -125,6 +139,7 @@ async function loadProjects(): Promise<void> {
     }
   } catch {
     projects = [];
+    mcpConnected = false;
   }
 }
 
@@ -144,9 +159,11 @@ async function loadDashboardSnapshot(): Promise<void> {
     currentProjectId = snapshot.project?.id ?? snapshot.project?.key ?? currentProjectId;
     selectedTaskId = pickSelectedTaskId(snapshot.tasks, selectedTaskId);
     connectionState = "connected";
+    mcpConnected = true;
   } catch (error) {
     errorMessage = error instanceof Error ? error.message : "Unable to load dashboard data.";
     connectionState = "disconnected";
+    mcpConnected = false;
   } finally {
     isLoading = false;
     renderApp();
@@ -157,6 +174,15 @@ async function loadGoals(): Promise<void> {
   goalsViewLoading = true;
   goalsViewErrorMessage = "";
   renderApp();
+
+  if (!hasActiveProject()) {
+    goals = [];
+    taskList = [];
+    selectedGoalId = "";
+    goalsViewLoading = false;
+    renderApp();
+    return;
+  }
 
   try {
     const [goalsResponse, tasksResponse] = await Promise.all([
@@ -183,6 +209,48 @@ async function loadGoals(): Promise<void> {
     selectedGoalId = "";
   } finally {
     goalsViewLoading = false;
+    renderApp();
+  }
+}
+
+async function loadAgents(): Promise<void> {
+  agentsViewLoading = true;
+  agentsViewErrorMessage = "";
+  renderApp();
+
+  try {
+    const response = await fetch(buildAgentsUrl(200));
+    if (!response.ok) {
+      throw new Error(`Agents request failed with status ${response.status}.`);
+    }
+    const dto = agentListDtoSchema.parse(await response.json());
+    agentList = dto.agents;
+  } catch (error) {
+    agentsViewErrorMessage = error instanceof Error ? error.message : "Unable to load agents.";
+    agentList = [];
+  } finally {
+    agentsViewLoading = false;
+    renderApp();
+  }
+}
+
+async function loadAgentLogs(agentDisplayName: string): Promise<void> {
+  agentLogsLoading = true;
+  agentLogsErrorMessage = "";
+  renderApp();
+
+  try {
+    const response = await fetch(buildMcpLogsUrl(agentDisplayName, 100));
+    if (!response.ok) {
+      throw new Error(`MCP logs request failed with status ${response.status}.`);
+    }
+    const dto = mcpLogListDtoSchema.parse(await response.json());
+    agentLogs = dto.logs;
+  } catch (error) {
+    agentLogsErrorMessage = error instanceof Error ? error.message : "Unable to load MCP logs.";
+    agentLogs = [];
+  } finally {
+    agentLogsLoading = false;
     renderApp();
   }
 }
@@ -220,6 +288,15 @@ async function loadTaskList(): Promise<void> {
   }
 }
 
+function hasActiveProject(): boolean {
+  if (projects.length > 0) {
+    return true;
+  }
+
+  const snapshotProjectId = dashboardSnapshot?.project?.id ?? dashboardSnapshot?.project?.key ?? "";
+  return Boolean(currentProjectId.trim() || snapshotProjectId.trim());
+}
+
 async function loadTaskDetail(taskId: string): Promise<void> {
   if (!taskId) {
     taskDetailEvents = null;
@@ -252,20 +329,24 @@ function connectDashboardStream(): void {
       dashboardSnapshot = parsed.data;
       selectedTaskId = pickSelectedTaskId(parsed.data.tasks, selectedTaskId);
       connectionState = "connected";
+    mcpConnected = true;
       renderApp();
     } catch {
       connectionState = "disconnected";
+    mcpConnected = false;
       renderApp();
     }
   });
 
   dashboardStream.onopen = () => {
     connectionState = "connected";
+    mcpConnected = true;
     renderApp();
   };
 
   dashboardStream.onerror = () => {
     connectionState = "disconnected";
+    mcpConnected = false;
     renderApp();
   };
 }
@@ -273,7 +354,6 @@ function connectDashboardStream(): void {
 async function loadMcpMeta(): Promise<void> {
   mcpLoading = true;
   mcpErrorMessage = "";
-  mcpProjectPath = null;
   renderApp();
 
   try {
@@ -281,8 +361,6 @@ async function loadMcpMeta(): Promise<void> {
     if (!response.ok) {
       throw new Error(`Meta request failed with status ${response.status}.`);
     }
-    const meta = (await response.json()) as { projectPath?: string };
-    mcpProjectPath = meta.projectPath ?? null;
   } catch (error) {
     mcpErrorMessage = error instanceof Error ? error.message : "Unable to load MCP config.";
   } finally {
@@ -304,11 +382,15 @@ async function loadDataForCurrentView(): Promise<void> {
       await loadTaskList();
       break;
     case "agents":
+      await loadAgents();
       if (!dashboardSnapshot) {
         await loadDashboardSnapshot();
       }
-      if (!selectedAgentName && (dashboardSnapshot?.agents?.length ?? 0) > 0) {
-        selectedAgentName = dashboardSnapshot!.agents[0].agentName;
+      if (!selectedAgentName && agentList.length > 0) {
+        selectedAgentName = agentList[0].displayName;
+      }
+      if (selectedAgentName) {
+        await loadAgentLogs(selectedAgentName);
       }
       break;
     case "analytics":
@@ -333,6 +415,10 @@ async function loadDataForCurrentView(): Promise<void> {
 }
 
 function resolveCurrentProject(): ProjectRecord | null {
+  if (!hasActiveProject()) {
+    return null;
+  }
+
   const byId = projects.find(
     (p) => p.id === currentProjectId || p.key === currentProjectId
   );
@@ -365,6 +451,7 @@ function renderMainContent(): string {
     case "project":
       return renderProjectView({
         project: resolveCurrentProject(),
+        hasProject: hasActiveProject(),
         goals,
         tasks: taskList,
         selectedTaskId,
@@ -393,6 +480,7 @@ function renderMainContent(): string {
     }
     case "goals":
       return renderGoalsView({
+        hasProject: hasActiveProject(),
         goals,
         tasks: taskList,
         selectedGoalId,
@@ -413,28 +501,29 @@ function renderMainContent(): string {
     }
     case "agents":
       return renderAgentsView({
-        snapshot: dashboardSnapshot,
-        selectedAgentName
+        agents: agentList,
+        tasks: dashboardSnapshot?.tasks ?? [],
+        selectedAgentName,
+        agentLogs,
+        isLoading: agentsViewLoading,
+        errorMessage: agentsViewErrorMessage,
+        agentLogsLoading,
+        agentLogsErrorMessage
       });
     case "analytics":
       return renderAnalyticsView({ snapshot: dashboardSnapshot, analyticsTimeRange });
     case "system-health":
       return renderSystemHealthView(dashboardSnapshot);
     case "mcp": {
-      const pathForConfig = mcpProjectPath ?? "<path-to-project>";
-      const config = {
-        mcpServers: {
-          opentasks: {
-            command: "npm",
-            args: ["--prefix", pathForConfig, "run", "start:mcp"]
-          }
-        }
-      };
-      mcpConfigJson = JSON.stringify(config, null, 2);
+      mcpConfigJson = JSON.stringify(
+        { mcpServers: { opentasks: { url: buildMcpUrl() } } },
+        null,
+        2
+      );
       return renderMcpView({
-        projectPath: mcpProjectPath,
         isLoading: mcpLoading,
-        errorMessage: mcpErrorMessage
+        errorMessage: mcpErrorMessage,
+        mcpUrl: buildMcpUrl()
       });
     }
     case "projects":
@@ -532,7 +621,7 @@ function renderApp(): void {
       )}
 
       <main class="main">
-        ${renderTopbar(getTopbarProps())}
+        ${renderTopbar({ ...getTopbarProps(), mcpConnected })}
         ${renderMainContent()}
       </main>
     </div>
@@ -865,14 +954,22 @@ function bindEvents(): void {
 
   document.querySelectorAll<HTMLElement>(".agent-row").forEach((row) => {
     row.addEventListener("click", () => {
-      selectedAgentName = row.dataset.agentName ?? selectedAgentName;
+      const name = row.dataset.agentName ?? selectedAgentName;
+      selectedAgentName = name;
       renderApp();
+      if (currentView === "agents" && name) {
+        void loadAgentLogs(name);
+      }
     });
     row.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        selectedAgentName = row.dataset.agentName ?? selectedAgentName;
+        const name = row.dataset.agentName ?? selectedAgentName;
+        selectedAgentName = name;
         renderApp();
+        if (currentView === "agents" && name) {
+          void loadAgentLogs(name);
+        }
       }
     });
   });

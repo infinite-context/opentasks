@@ -1,20 +1,18 @@
 import { escapeHtml } from "../utils";
 
 export interface McpViewProps {
-  projectPath: string | null;
   isLoading: boolean;
   errorMessage: string;
+  mcpUrl: string;
 }
 
 export function renderMcpView(props: McpViewProps): string {
-  const { projectPath, isLoading, errorMessage } = props;
+  const { isLoading, errorMessage, mcpUrl } = props;
 
-  const pathForConfig = projectPath ?? "<path-to-project>";
   const mcpConfig = {
     mcpServers: {
       opentasks: {
-        command: "npm",
-        args: ["--prefix", pathForConfig, "run", "start:mcp"]
+        url: mcpUrl
       }
     }
   };
@@ -30,7 +28,7 @@ export function renderMcpView(props: McpViewProps): string {
       </div>
 
       <p class="detail-summary">
-        Add the OpenTasks MCP server to your Cursor or other MCP client by adding the following to your <code>mcp.json</code> config file.
+        Add the OpenTasks MCP server to your Cursor or other MCP client by adding the following to your <code>mcp.json</code> config file. The server uses Streamable HTTP (SSE) at <code>/mcp</code>.
       </p>
 
       ${
@@ -41,7 +39,7 @@ export function renderMcpView(props: McpViewProps): string {
 
       ${
         isLoading
-          ? `<div class="detail-callout"><div class="detail-value">Loading project path...</div></div>`
+          ? `<div class="detail-callout"><div class="detail-value">Loading...</div></div>`
           : `
               <div class="mcp-config-block">
                 <pre class="mcp-config__pre"><code class="mcp-config__code">${escapeHtml(configJson)}</code></pre>
@@ -53,11 +51,7 @@ export function renderMcpView(props: McpViewProps): string {
                 </button>
               </div>
               <p class="detail-summary" style="margin-top: 1rem;">
-                ${
-                  projectPath != null
-                    ? "The path above is resolved from the server&rsquo;s current working directory. Override with <code>OPENTASKS_PROJECT_PATH</code> if needed."
-                    : "Replace <code>&lt;path-to-project&gt;</code> with your OpenTasks project directory (e.g. <code>c:/Development/OpenTasks</code>). Ensure the server is running to auto-detect the path."
-                }
+                Ensure the OpenTasks server is running (<code>npm run start:server</code>) before connecting. Cursor connects over HTTP/SSE to the MCP endpoint.
               </p>
             `
       }

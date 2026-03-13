@@ -1,5 +1,6 @@
 export { renderActivityCard } from "./ActivityCard";
 export { renderAgentDetailCard } from "./AgentDetailCard";
+export { renderAgentLogsCard } from "./AgentLogsCard";
 export { renderAgentListSection } from "./AgentListSection";
 export { renderAgentUtilizationCard } from "./AgentUtilizationCard";
 export { renderHealthCard } from "./HealthCard";

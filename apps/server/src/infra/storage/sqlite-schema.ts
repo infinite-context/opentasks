@@ -87,12 +87,53 @@ export function applySqliteSchema(db: Database, logger: Logger): void {
       payload_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS agents (
+      id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL UNIQUE,
+      client_name TEXT,
+      client_version TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS mcp_logs (
+      id TEXT PRIMARY KEY,
+      agent_display_name TEXT,
+      tool_name TEXT NOT NULL,
+      args_json TEXT NOT NULL DEFAULT '{}',
+      result_json TEXT,
+      result_status TEXT NOT NULL CHECK (result_status IN ('ok', 'error')),
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   ensureTasksGoalColumn(db);
   ensureProjectDescriptionAndWorkingDir(db, logger);
+  ensureMcpLogsResultJsonColumn(db, logger);
   ensureSqliteIndexes(db);
   backfillProjectGoals(db, logger);
+}
+
+function ensureAgentsTable(db: Database, logger: Logger): void {
+  const tables = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='agents'"
+  ).get();
+  if (!tables) {
+    db.exec(`
+      CREATE TABLE agents (
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL UNIQUE,
+        client_name TEXT,
+        client_version TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE UNIQUE INDEX idx_agents_display_name ON agents(display_name);
+    `);
+    logger.step("storage:sqlite-schema", "Created agents table.");
+  }
 }
 
 function ensureTasksGoalColumn(db: Database): void {
@@ -116,6 +157,16 @@ function ensureProjectDescriptionAndWorkingDir(db: Database, logger: Logger): vo
   if (!hasWorkingDir) {
     db.exec("ALTER TABLE projects ADD COLUMN working_directory TEXT NOT NULL DEFAULT '';");
     logger.step("storage:sqlite-schema", "Added working_directory column to projects.");
+  }
+}
+
+function ensureMcpLogsResultJsonColumn(db: Database, logger: Logger): void {
+  const columns = db.prepare("PRAGMA table_info(mcp_logs)").all() as Array<{ name: string }>;
+  const hasResultJson = columns.some((c) => c.name === "result_json");
+
+  if (!hasResultJson) {
+    db.exec("ALTER TABLE mcp_logs ADD COLUMN result_json TEXT;");
+    logger.step("storage:sqlite-schema", "Added result_json column to mcp_logs.");
   }
 }
 
@@ -150,6 +201,12 @@ function ensureSqliteIndexes(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_goals_project_status_priority
       ON goals(project_id, status, priority);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_display_name
+      ON agents(display_name);
+
+    CREATE INDEX IF NOT EXISTS idx_mcp_logs_agent_created_at
+      ON mcp_logs(agent_display_name, created_at DESC);
   `);
 }
 

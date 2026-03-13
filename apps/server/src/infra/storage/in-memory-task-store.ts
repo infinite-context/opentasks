@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Logger } from "../logging";
+import { pathsEqual } from "../path-utils";
+import { resolveProjectFromRef } from "./project-ref-resolver";
 import type {
   ClaimedTask,
   CreateGoalInput,
@@ -16,7 +18,8 @@ import type {
   TaskQueryFilters,
   TaskRecord,
   TaskRelease,
-  UpdateGoalInput
+  UpdateGoalInput,
+  UpdateProjectInput
 } from "@opentasks/contracts";
 import type { CoordinationStore } from "./task-store";
 
@@ -90,7 +93,7 @@ function resolveProjectId(projects: ProjectRecord[], projectRef?: string): strin
     return null;
   }
 
-  const project = projects.find((candidate) => candidate.id === projectRef || candidate.key === projectRef);
+  const project = resolveProjectFromRef(projects, projectRef);
   return project?.id ?? null;
 }
 
@@ -133,7 +136,20 @@ export function createInMemoryTaskStore({
       return cloneProject(project);
     },
     async getProject(projectRef: string): Promise<ProjectRecord | null> {
-      const project = projects.find((candidate) => candidate.id === projectRef || candidate.key === projectRef);
+      const project = resolveProjectFromRef(projects, projectRef);
+      return project ? cloneProject(project) : null;
+    },
+    async updateProject(input: UpdateProjectInput): Promise<ProjectRecord | null> {
+      const project = resolveProjectFromRef(projects, input.projectId);
+      if (!project) return null;
+      project.description = input.description;
+      project.updatedAt = currentTimestamp();
+      return cloneProject(project);
+    },
+    async getProjectByWorkingDirectory(workingDirectory: string): Promise<ProjectRecord | null> {
+      const project = projects.find(
+        (candidate) => candidate.workingDirectory && pathsEqual(candidate.workingDirectory, workingDirectory)
+      );
       return project ? cloneProject(project) : null;
     },
     async listProjects(limit?: number): Promise<ProjectRecord[]> {

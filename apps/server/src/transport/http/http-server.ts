@@ -7,7 +7,9 @@ import fastify from "fastify";
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from "fastify-type-provider-zod";
 import { FastifySSEPlugin } from "fastify-sse-v2";
 import {
+  agentListQuerySchema,
   createProjectInputSchema,
+  mcpLogListQuerySchema,
   dashboardQuerySchema,
   dashboardStreamEventDtoSchema,
   goalListQuerySchema,
@@ -15,11 +17,19 @@ import {
   taskListQuerySchema
 } from "@opentasks/contracts/schemas";
 import type { Logger } from "../../infra/logging";
+import type { AgentService } from "../../system/agent-service";
+import type { McpLogStore } from "../../infra/storage/mcp-log-store";
 import type { DashboardQueryService } from "../../system/dashboard-query-service";
 import type { GoalService } from "../../system/goal-service";
 import type { ProjectService } from "../../system/project-service";
 import type { TaskQueryService } from "../../system/task-query-service";
 import type { HttpTransport } from "./types";
+
+export interface McpHttpHandler {
+  handlePost: (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, body?: unknown) => Promise<void>;
+  handleGet: (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => Promise<void>;
+  handleDelete: (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => Promise<void>;
+}
 
 interface CreateHttpTransportParams {
   logger: Logger;
@@ -31,6 +41,9 @@ interface CreateHttpTransportParams {
   goalService: GoalService;
   dashboardQueryService: DashboardQueryService;
   taskQueryService: TaskQueryService;
+  agentService?: AgentService;
+  mcpLogStore?: McpLogStore;
+  mcpHandler?: McpHttpHandler;
 }
 
 const execAsync = promisify(exec);
@@ -67,7 +80,10 @@ export function createHttpTransport({
   projectService,
   goalService,
   dashboardQueryService,
-  taskQueryService
+  taskQueryService,
+  agentService,
+  mcpLogStore,
+  mcpHandler
 }: CreateHttpTransportParams): HttpTransport {
   const server = fastify({
     logger: false,
@@ -82,12 +98,25 @@ export function createHttpTransport({
   server.addHook("onRequest", async (request, reply) => {
     reply.header("Access-Control-Allow-Origin", "*");
     reply.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    reply.header("Access-Control-Allow-Headers", "Content-Type");
+    reply.header("Access-Control-Allow-Headers", "Content-Type, MCP-Session-Id");
   });
 
   server.options("*", async (request, reply) => {
     return reply.status(204).send();
   });
+
+  if (mcpHandler) {
+    server.post("/mcp", async (request, reply) => {
+      const body = (request as { body?: unknown }).body;
+      await mcpHandler.handlePost(request.raw, reply.raw, body);
+    });
+    server.get("/mcp", async (request, reply) => {
+      await mcpHandler.handleGet(request.raw, reply.raw);
+    });
+    server.delete("/mcp", async (request, reply) => {
+      await mcpHandler.handleDelete(request.raw, reply.raw);
+    });
+  }
 
   server.get("/api/projects", {
     schema: {
@@ -121,6 +150,31 @@ export function createHttpTransport({
     const result = await goalService.listGoals(request.query.projectId);
     return reply.status(200).send(result);
   });
+
+  if (agentService) {
+    server.get("/api/agents", {
+      schema: {
+        querystring: agentListQuerySchema
+      }
+    }, async (request, reply) => {
+      const agents = await agentService.listAgents(request.query.limit);
+      return reply.status(200).send({ agents });
+    });
+  }
+
+  if (mcpLogStore) {
+    server.get("/api/mcp-logs", {
+      schema: {
+        querystring: mcpLogListQuerySchema
+      }
+    }, async (request, reply) => {
+      const logs = await mcpLogStore.listLogsByAgent(
+        request.query.agentDisplayName,
+        request.query.limit
+      );
+      return reply.status(200).send({ logs });
+    });
+  }
 
   server.get("/api/dashboard", {
     schema: {
@@ -248,6 +302,11 @@ export function createHttpTransport({
     } catch (error) {
       return reply.status(500).send({ error: "Failed to open folder picker" });
     }
+  });
+
+  server.post("/api/shutdown", async (request, reply) => {
+    await reply.status(200).send({ ok: true });
+    setImmediate(() => process.kill(process.pid, "SIGTERM"));
   });
 
   server.setErrorHandler((error: any, request, reply) => {

@@ -1,12 +1,16 @@
-import { escapeHtml, renderIcon } from "../utils";
+import { escapeHtml } from "../utils";
 
 export interface TopbarProps {
   title: string;
   subtitle?: string;
+  mcpConnected: boolean;
+  mcpChecking?: boolean;
 }
 
 export function renderTopbar(props: TopbarProps): string {
-  const { title, subtitle = "Live dashboard" } = props;
+  const { title, subtitle = "Live dashboard", mcpConnected, mcpChecking = false } = props;
+  const statusLabel = mcpChecking ? "Checking…" : mcpConnected ? "MCP connected" : "MCP disconnected";
+  const statusClass = mcpChecking ? "mcp-status--checking" : mcpConnected ? "mcp-status--connected" : "mcp-status--disconnected";
   return `
     <header class="topbar">
       <div>
@@ -15,16 +19,10 @@ export function renderTopbar(props: TopbarProps): string {
       </div>
 
       <div class="topbar__actions">
-        <label class="search">
-          <span class="search__icon">${renderIcon("fa-solid fa-magnifying-glass")}</span>
-          <input disabled type="search" placeholder="Backend-backed view only" />
-        </label>
-        <button class="button button--primary" disabled title="Observe-only dashboard" type="button">
-          <span class="button__content">
-            ${renderIcon("fa-solid fa-plus")}
-            <span>Create task</span>
-          </span>
-        </button>
+        <span class="mcp-status ${statusClass}" title="${escapeHtml(statusLabel)}" data-mcp-status>
+          <span class="mcp-status__dot" aria-hidden="true"></span>
+          <span class="mcp-status__label">${escapeHtml(statusLabel)}</span>
+        </span>
       </div>
     </header>
   `;

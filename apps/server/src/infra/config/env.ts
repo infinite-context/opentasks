@@ -3,6 +3,7 @@ export interface AppEnv {
   appVersion: string;
   environment: string;
   mcpEnabled: boolean;
+  mcpOverHttp: boolean;
   storageDriver: "memory" | "sqlite";
   databaseUrl: string | null;
   autoMigrate: boolean;
@@ -19,6 +20,7 @@ export function loadEnv(): AppEnv {
     appVersion: process.env.OPENTASKS_APP_VERSION ?? "0.1.0",
     environment: process.env.NODE_ENV ?? "development",
     mcpEnabled: parseBoolean(process.env.OPENTASKS_MCP_ENABLED, true),
+    mcpOverHttp: parseBoolean(process.env.OPENTASKS_MCP_OVER_HTTP, true),
     storageDriver: resolveStorageDriver(databaseUrl),
     databaseUrl,
     autoMigrate: parseBoolean(process.env.OPENTASKS_AUTO_MIGRATE, true),

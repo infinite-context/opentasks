@@ -26,6 +26,11 @@ export interface CreateProjectInput {
   workingDirectory: string;
 }
 
+export interface UpdateProjectInput {
+  projectId: string;
+  description: string;
+}
+
 export interface ProjectListQuery {
   limit?: number;
 }
@@ -137,6 +142,34 @@ export interface TaskDetailDto {
   events: TaskEvent[];
 }
 
+export interface AgentRecordDto {
+  id: string;
+  displayName: string;
+  clientName: string | null;
+  clientVersion: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+}
+
+export interface AgentListDto {
+  agents: AgentRecordDto[];
+}
+
+export interface McpLogRecordDto {
+  id: string;
+  agentDisplayName: string | null;
+  toolName: string;
+  argsJson: string;
+  resultJson: string | null;
+  resultStatus: "ok" | "error";
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export interface McpLogListDto {
+  logs: McpLogRecordDto[];
+}
+
 export interface ProjectListDto {
   projects: ProjectRecord[];
 }
@@ -240,10 +273,12 @@ export interface DashboardStreamEventDto {
 }
 
 export interface OperationContextDto {
+  projectId?: string;
   project?: ProjectRecord | null;
   projects?: ProjectRecord[];
   goal?: GoalRecord | null;
   goals?: GoalRecord[];
+  goalSummary?: string;
   task?: TaskRecord | ClaimedTask | null;
   events?: TaskEvent[];
   input?: CreateProjectInput;
