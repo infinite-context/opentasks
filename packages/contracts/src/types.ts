@@ -26,6 +26,13 @@ export type TaskEventType =
   | "task_requeued";
 export type TaskEventActorType = "agent" | "system";
 export type TaskOutcome = "success" | "failure";
+export type RetrievedContextItemKind =
+  | "code_chunk"
+  | "file_summary"
+  | "symbol_summary"
+  | "instruction"
+  | "architecture_note"
+  | "run_note";
 
 export interface ProjectRecord extends AuditableModel {
   key: string;
@@ -86,6 +93,21 @@ export interface MemoryArtifact extends IdentityModel {
   taskId: string;
   summary: string;
   source: "contextual-indexing";
+}
+
+export interface RetrievedContextItem extends IdentityModel {
+  kind: RetrievedContextItemKind;
+  projectId: string;
+  goalId?: string | null;
+  taskId?: string | null;
+  content: string;
+  summary?: string | null;
+  filePath?: string | null;
+  symbolName?: string | null;
+  startLine?: number | null;
+  endLine?: number | null;
+  tags?: string[];
+  score?: number | null;
 }
 
 export type OperationStatus =

@@ -4,6 +4,7 @@ import type {
   MemoryArtifact,
   OperationStatus,
   ProjectRecord,
+  RetrievedContextItem,
   TaskEvent,
   TaskOutcome,
   TaskRecord,
@@ -113,7 +114,7 @@ export interface TaskRelease {
 
 export interface ContextPacket {
   taskId: string;
-  relatedMemories: string[];
+  items: RetrievedContextItem[];
   notes: string[];
 }
 

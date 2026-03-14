@@ -1,5 +1,5 @@
-import type { TaskRecord } from "@opentasks/contracts";
+import type { RetrievedContextItem, TaskRecord } from "@opentasks/contracts";
 
 export interface VectorSearchEngine {
-  searchTaskContext(task: TaskRecord): Promise<string[]>;
+  searchTaskContext(task: TaskRecord): Promise<RetrievedContextItem[]>;
 }
