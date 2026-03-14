@@ -1,12 +1,26 @@
 import { randomUUID } from "node:crypto";
 import type { Logger } from "../logging";
 import type { Database } from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
+
+const loadedSqliteVecDatabases = new WeakSet<Database>();
+
+export interface ApplySqliteSchemaOptions {
+  embeddingDimensions?: number;
+}
 
 export function generateId(prefix: string): string {
   return `${prefix}_${randomUUID().replace(/-/g, "")}`;
 }
 
-export function applySqliteSchema(db: Database, logger: Logger): void {
+export function applySqliteSchema(
+  db: Database,
+  logger: Logger,
+  options: ApplySqliteSchemaOptions = {}
+): void {
+  const embeddingDimensions = resolveEmbeddingDimensions(options.embeddingDimensions);
+  loadSqliteVecExtension(db);
+
   logger.step("storage:sqlite-schema", "Applying SQLite schema for goal-driven task coordination.");
 
   db.exec(`
@@ -107,6 +121,24 @@ export function applySqliteSchema(db: Database, logger: Logger): void {
       error_message TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS memory_artifacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      external_id TEXT NOT NULL UNIQUE,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL DEFAULT 'run_note',
+      content TEXT NOT NULL,
+      summary TEXT,
+      source TEXT NOT NULL DEFAULT 'contextual-indexing',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_artifacts_vec
+    USING vec0(embedding float[${embeddingDimensions}]);
   `);
 
   ensureTasksGoalColumn(db);
@@ -207,6 +239,18 @@ function ensureSqliteIndexes(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_mcp_logs_agent_created_at
       ON mcp_logs(agent_display_name, created_at DESC);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_artifacts_external_id
+      ON memory_artifacts(external_id);
+
+    CREATE INDEX IF NOT EXISTS idx_memory_artifacts_project_id
+      ON memory_artifacts(project_id);
+
+    CREATE INDEX IF NOT EXISTS idx_memory_artifacts_goal_id
+      ON memory_artifacts(goal_id);
+
+    CREATE INDEX IF NOT EXISTS idx_memory_artifacts_task_id
+      ON memory_artifacts(task_id);
   `);
 }
 
@@ -259,4 +303,21 @@ function backfillProjectGoals(db: Database, logger: Logger): void {
 
     attachTasksToGoal.run(goalId, project.id);
   }
+}
+
+function loadSqliteVecExtension(db: Database): void {
+  if (loadedSqliteVecDatabases.has(db)) {
+    return;
+  }
+
+  sqliteVec.load(db);
+  loadedSqliteVecDatabases.add(db);
+}
+
+function resolveEmbeddingDimensions(value: number | undefined): number {
+  if (Number.isInteger(value) && typeof value === "number" && value > 0) {
+    return value;
+  }
+
+  return 256;
 }

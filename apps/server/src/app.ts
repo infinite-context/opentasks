@@ -49,7 +49,7 @@ export function createApp(overrides?: Partial<AppEnv>): App {
       db = new Database(dbPath);
       logger.info("bootstrap", `Connected to SQLite database at ${dbPath}`);
       if (env.autoMigrate) {
-        applySqliteSchema(db, logger);
+        applySqliteSchema(db, logger, { embeddingDimensions: env.embeddingDimensions });
       }
     } catch (err) {
       logger.info("bootstrap", `Failed to initialize SQLite database at ${env.databaseUrl}: ${err instanceof Error ? err.message : String(err)}`);

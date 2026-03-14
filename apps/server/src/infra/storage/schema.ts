@@ -1,4 +1,4 @@
-import { sqliteTable, text, primaryKey, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, primaryKey, index, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const agents = sqliteTable("agents", {
@@ -96,5 +96,25 @@ export const taskEvents = sqliteTable("task_events", {
   return {
     taskCreatedAtIdx: index("idx_task_events_task_created_at").on(table.taskId, table.createdAt),
     projectCreatedAtIdx: index("idx_task_events_project_created_at").on(table.projectId, table.createdAt),
+  };
+});
+
+export const memoryArtifacts = sqliteTable("memory_artifacts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  externalId: text("external_id").notNull(),
+  taskId: text("task_id").notNull().references(() => tasks.id, { onDelete: "cascade" }),
+  goalId: text("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("run_note"),
+  content: text("content").notNull(),
+  summary: text("summary"),
+  source: text("source").notNull().default("contextual-indexing"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => {
+  return {
+    externalIdIdx: uniqueIndex("idx_memory_artifacts_external_id").on(table.externalId),
+    projectIdIdx: index("idx_memory_artifacts_project_id").on(table.projectId),
+    goalIdIdx: index("idx_memory_artifacts_goal_id").on(table.goalId),
+    taskIdIdx: index("idx_memory_artifacts_task_id").on(table.taskId),
   };
 });
