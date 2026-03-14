@@ -4,6 +4,10 @@ export interface AppEnv {
   environment: string;
   mcpEnabled: boolean;
   mcpOverHttp: boolean;
+  embeddingApiUrl: string;
+  embeddingApiKey: string | null;
+  embeddingModel: string;
+  embeddingDimensions: number;
   storageDriver: "memory" | "sqlite";
   databaseUrl: string | null;
   autoMigrate: boolean;
@@ -21,6 +25,10 @@ export function loadEnv(): AppEnv {
     environment: process.env.NODE_ENV ?? "development",
     mcpEnabled: parseBoolean(process.env.OPENTASKS_MCP_ENABLED, true),
     mcpOverHttp: parseBoolean(process.env.OPENTASKS_MCP_OVER_HTTP, true),
+    embeddingApiUrl: process.env.EMBEDDING_API_URL ?? "https://api.openai.com/v1/embeddings",
+    embeddingApiKey: process.env.EMBEDDING_API_KEY ?? null,
+    embeddingModel: process.env.EMBEDDING_MODEL ?? "text-embedding-3-small",
+    embeddingDimensions: parseInteger(process.env.EMBEDDING_DIMENSIONS, 256),
     storageDriver: resolveStorageDriver(databaseUrl),
     databaseUrl,
     autoMigrate: parseBoolean(process.env.OPENTASKS_AUTO_MIGRATE, true),
