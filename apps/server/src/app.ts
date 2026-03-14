@@ -5,6 +5,10 @@ import { cwd as getCwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { loadEnv } from "./infra/config";
 import { createLogger } from "./infra/logging";
+import { createNoopEmbeddingProvider } from "./infra/providers/noop-embedding-provider";
+import { createNoopModelProvider } from "./infra/providers/noop-model-provider";
+import { createOpenAiEmbeddingProvider } from "./infra/providers/openai-embedding-provider";
+import { createOpenRouterProvider } from "./infra/providers/openrouter-provider";
 import { createInMemoryAgentStore } from "./infra/storage/in-memory-agent-store";
 import { createInMemoryMcpLogStore } from "./infra/storage/in-memory-mcp-log-store";
 import { createInMemoryTaskStore } from "./infra/storage/in-memory-task-store";
@@ -12,14 +16,22 @@ import { createSqliteAgentStore } from "./infra/storage/sqlite-agent-store";
 import { createSqliteMcpLogStore } from "./infra/storage/sqlite-mcp-log-store";
 import { createSqliteTaskDatabase } from "./infra/storage/sqlite-task-database";
 import { applySqliteSchema } from "./infra/storage/sqlite-schema";
+import { createSqliteVecDatabase } from "./infra/storage/sqlite-vec-database";
+import { createInMemoryVectorDatabase } from "./infra/storage/vector-database";
 import { createAgentService } from "./system/agent-service";
+import { createContextHydrator } from "./system/context-hydrator";
 import { createDashboardQueryService } from "./system/dashboard-query-service";
 import { createExecutionLoop } from "./system/execution-loop";
 import { createGoalService } from "./system/goal-service";
+import { createIndexer } from "./system/indexer";
+import { createInternalAgent } from "./system/internal-agent";
+import { createLearningLoop } from "./system/learning-loop";
+import { createModelProviderService } from "./system/model-provider-service";
 import { createProjectService } from "./system/project-service";
 import { createSessionService } from "./system/session-service";
 import { createTaskListManager } from "./system/task-list-manager";
 import { createTaskOrchestrator } from "./system/task-orchestrator";
+import { createVectorSearchEngine } from "./system/vector-search-engine";
 import { createTaskService } from "./system/task-service";
 import { createTaskQueryService } from "./system/task-query-service";
 import { createTaskResolutionService } from "./system/task-resolution-service";
@@ -61,20 +73,76 @@ export function createApp(overrides?: Partial<AppEnv>): App {
     env.storageDriver = "memory";
   }
 
+  const sqliteDb = env.storageDriver === "sqlite" ? db : null;
   const taskStore =
-    env.storageDriver === "sqlite" && db
-      ? createSqliteTaskDatabase({ logger, db })
+    sqliteDb
+      ? createSqliteTaskDatabase({ logger, db: sqliteDb })
       : createInMemoryTaskStore({ logger });
 
   const agentStore =
-    env.storageDriver === "sqlite" && db
-      ? createSqliteAgentStore({ db })
+    sqliteDb
+      ? createSqliteAgentStore({ db: sqliteDb })
       : createInMemoryAgentStore();
 
   const mcpLogStore =
-    env.storageDriver === "sqlite" && db
-      ? createSqliteMcpLogStore({ db })
+    sqliteDb
+      ? createSqliteMcpLogStore({ db: sqliteDb })
       : createInMemoryMcpLogStore();
+
+  const modelProvider = env.openrouterApiKey
+    ? createOpenRouterProvider({
+        logger,
+        apiKey: env.openrouterApiKey,
+        model: env.openrouterModel,
+        apiUrl: env.openrouterApiUrl
+      })
+    : createNoopModelProvider({ logger });
+  const modelProviderService = createModelProviderService({
+    logger,
+    provider: modelProvider
+  });
+  const internalAgent = createInternalAgent({
+    logger,
+    modelProviderService
+  });
+
+  const embeddingProvider = env.embeddingApiKey
+    ? createOpenAiEmbeddingProvider({
+        logger,
+        apiUrl: env.embeddingApiUrl,
+        apiKey: env.embeddingApiKey,
+        model: env.embeddingModel,
+        dimensions: env.embeddingDimensions
+      })
+    : createNoopEmbeddingProvider({
+        logger,
+        dimensions: env.embeddingDimensions
+      });
+  const vectorDatabaseMode = sqliteDb ? "sqlite-vec" : "in-memory";
+  const vectorDatabase = sqliteDb
+    ? createSqliteVecDatabase({
+        logger,
+        db: sqliteDb,
+        embeddingProvider
+      })
+    : createInMemoryVectorDatabase({ logger });
+  const vectorSearchEngine = createVectorSearchEngine({
+    logger,
+    vectorDatabase
+  });
+  const contextHydrator = createContextHydrator({
+    logger,
+    vectorSearchEngine
+  });
+  const indexer = createIndexer({
+    logger,
+    internalAgent,
+    vectorDatabase
+  });
+  const learningLoop = createLearningLoop({
+    logger,
+    indexer
+  });
 
   const agentService = createAgentService({ logger, agentStore });
 
@@ -102,15 +170,15 @@ export function createApp(overrides?: Partial<AppEnv>): App {
     taskStore,
     validationService
   });
+  const taskListManager = createTaskListManager({
+    logger,
+    taskStore
+  });
   const taskService = createTaskService({
     logger,
     taskStore,
     validationService,
     defaultLeaseDurationSeconds: env.defaultLeaseDurationSeconds
-  });
-  const taskListManager = createTaskListManager({
-    logger,
-    taskStore
   });
   const taskOrchestrator = createTaskOrchestrator({
     logger,
@@ -199,6 +267,10 @@ export function createApp(overrides?: Partial<AppEnv>): App {
       logger.section("Bootstrap");
       logger.info("bootstrap", `Starting ${env.appName} backend in ${env.environment} mode.`);
       logger.info("bootstrap", `Using ${env.storageDriver} task storage.`);
+      logger.info(
+        "bootstrap",
+        `Learning pipeline: model=${modelProvider.name}, embeddings=${embeddingProvider.name}, vectorDb=${vectorDatabaseMode}.`
+      );
 
       if (mcpTransport) {
         await mcpTransport.start();
