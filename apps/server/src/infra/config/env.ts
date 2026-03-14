@@ -8,6 +8,9 @@ export interface AppEnv {
   embeddingApiKey: string | null;
   embeddingModel: string;
   embeddingDimensions: number;
+  openrouterApiKey: string | null;
+  openrouterModel: string;
+  openrouterApiUrl: string;
   storageDriver: "memory" | "sqlite";
   databaseUrl: string | null;
   autoMigrate: boolean;
@@ -29,6 +32,9 @@ export function loadEnv(): AppEnv {
     embeddingApiKey: process.env.EMBEDDING_API_KEY ?? null,
     embeddingModel: process.env.EMBEDDING_MODEL ?? "text-embedding-3-small",
     embeddingDimensions: parseInteger(process.env.EMBEDDING_DIMENSIONS, 256),
+    openrouterApiKey: process.env.OPENROUTER_API_KEY ?? null,
+    openrouterModel: process.env.OPENROUTER_MODEL ?? "google/gemini-2.0-flash-001",
+    openrouterApiUrl: process.env.OPENROUTER_API_URL ?? "https://openrouter.ai/api/v1/chat/completions",
     storageDriver: resolveStorageDriver(databaseUrl),
     databaseUrl,
     autoMigrate: parseBoolean(process.env.OPENTASKS_AUTO_MIGRATE, true),
