@@ -112,6 +112,12 @@ export interface TaskRelease {
   metadata?: Record<string, unknown>;
 }
 
+export interface SubmitTaskContextInput {
+  taskId: string;
+  messages: string[];
+  summary?: string;
+}
+
 export interface ContextPacket {
   taskId: string;
   items: RetrievedContextItem[];

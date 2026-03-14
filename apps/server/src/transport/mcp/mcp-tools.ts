@@ -6,6 +6,7 @@ import {
   dashboardQuerySchema,
   goalListQuerySchema,
   projectListQuerySchema,
+  submitTaskContextInputSchema,
   taskActionSchema as sharedTaskActionSchema,
   taskClaimByIdSchema,
   taskCompletionSchema,
@@ -23,6 +24,7 @@ import type { AgentService } from "../../system/agent-service";
 import type { DashboardQueryService } from "../../system/dashboard-query-service";
 import type { ExecutionLoop } from "../../system/execution-loop/execution-loop";
 import type { GoalService } from "../../system/goal-service";
+import type { LearningLoop } from "../../system/learning-loop";
 import type { ProjectService } from "../../system/project-service";
 import type { SessionService } from "../../system/session-service";
 import type { TaskService } from "../../system/task-service";
@@ -38,6 +40,7 @@ export interface McpToolsServices {
   taskQueryService: TaskQueryService;
   taskResolutionService: TaskResolutionService;
   dashboardQueryService: DashboardQueryService;
+  learningLoop?: LearningLoop | null;
 }
 
 /**
@@ -69,6 +72,7 @@ const taskSearchQueryShape = taskSearchQuerySchema.shape;
 const dashboardQueryShape = dashboardQuerySchema.shape;
 const taskActionShape = sharedTaskActionSchema.shape;
 const taskClaimByIdShape = taskClaimByIdSchema.shape;
+const submitTaskContextInputShape = submitTaskContextInputSchema.shape;
 
 function withLogging<TArgs, TExtra>(
   toolName: string,
@@ -140,7 +144,8 @@ export function registerMcpTools(
     executionLoop,
     taskQueryService,
     taskResolutionService,
-    dashboardQueryService
+    dashboardQueryService,
+    learningLoop
   } = services;
 
   const wrap = <TArgs, TExtra>(
@@ -481,6 +486,64 @@ export function registerMcpTools(
   );
 
   server.registerTool(
+    "submit_task_context",
+    {
+      title: "Submit Task Context",
+      description:
+        "Submit post-task context for a completed or failed task so it can be indexed into the learning pipeline.",
+      inputSchema: submitTaskContextInputShape
+    },
+    wrap("submit_task_context", async (args) => {
+      if (!learningLoop) {
+        return toolResponse({
+          status: "error",
+          message: "Learning pipeline is not configured.",
+          guidance: ["Configure the learning loop before calling submit_task_context."],
+          isError: true
+        });
+      }
+
+      const { task } = await taskQueryService.getTaskDetail(args.taskId);
+      if (!task) {
+        return toolResponse({
+          status: "task_not_found",
+          message: `Task "${args.taskId}" was not found.`,
+          isError: true
+        });
+      }
+
+      const outcome = resolveTaskOutcome(task.status);
+      if (!outcome) {
+        return toolResponse({
+          status: "invalid_transition",
+          message: `Task "${task.id}" must be completed or failed before submitting context.`,
+          guidance: ["Wait until the task reaches a terminal state, then submit its context."],
+          isError: true
+        });
+      }
+
+      const summary = args.summary ?? args.messages.join("\n\n");
+      const artifacts = await learningLoop.run({
+        taskId: task.id,
+        projectId: task.projectId,
+        summary,
+        outcome
+      });
+
+      return toolResponse({
+        status: "ok",
+        message: `Indexed ${artifacts.length} artifact(s) for task ${task.id}.`,
+        structuredContent: {
+          taskId: task.id,
+          projectId: task.projectId,
+          outcome,
+          indexedArtifacts: artifacts.length
+        }
+      });
+    })
+  );
+
+  server.registerTool(
     "get_task",
     {
       title: "Get Task",
@@ -511,7 +574,49 @@ function toToolResult(result: OperationResultDto) {
   };
 }
 
-function renderMessage(result: OperationResultDto): string {
+function toolResponse({
+  status,
+  message,
+  guidance = [],
+  structuredContent,
+  isError = false
+}: {
+  status: string;
+  message: string;
+  guidance?: string[];
+  structuredContent?: Record<string, unknown>;
+  isError?: boolean;
+}) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: renderMessage({ message, guidance })
+      }
+    ],
+    structuredContent: {
+      status,
+      message,
+      guidance,
+      ...(structuredContent ?? {})
+    },
+    isError
+  };
+}
+
+function resolveTaskOutcome(status: "completed" | "failed" | string): "success" | "failure" | null {
+  if (status === "completed") {
+    return "success";
+  }
+
+  if (status === "failed") {
+    return "failure";
+  }
+
+  return null;
+}
+
+function renderMessage(result: Pick<OperationResultDto, "message" | "guidance">): string {
   if (result.guidance.length === 0) {
     return result.message;
   }

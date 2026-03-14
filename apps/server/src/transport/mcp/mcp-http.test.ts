@@ -9,6 +9,7 @@ import { createAgentService } from "../../system/agent-service";
 import { createDashboardQueryService } from "../../system/dashboard-query-service";
 import { createExecutionLoop } from "../../system/execution-loop";
 import { createGoalService } from "../../system/goal-service";
+import type { LearningLoop } from "../../system/learning-loop";
 import { createProjectService } from "../../system/project-service";
 import { createSessionService } from "../../system/session-service";
 import { createTaskListManager } from "../../system/task-list-manager";
@@ -73,6 +74,20 @@ test("mcp over http assigns agent per session and task lifecycle works without a
     taskStore
   });
   const dashboardQueryService = createDashboardQueryService({ logger, taskStore });
+  const learningRuns: Array<{ taskId: string; projectId: string; summary: string; outcome: string }> = [];
+  const learningLoop: LearningLoop = {
+    async run(run: Parameters<LearningLoop["run"]>[0]) {
+      learningRuns.push(run);
+      return [
+        {
+          id: `artifact-${learningRuns.length}`,
+          taskId: run.taskId,
+          summary: run.summary,
+          source: "contextual-indexing"
+        }
+      ];
+    }
+  };
 
   const mcpHandler = createMcpHttpHandler({
     logger,
@@ -86,7 +101,8 @@ test("mcp over http assigns agent per session and task lifecycle works without a
     taskQueryService,
     taskResolutionService,
     dashboardQueryService,
-    agentService
+    agentService,
+    learningLoop
   });
 
   const httpTransport = createHttpTransport({
@@ -174,6 +190,31 @@ test("mcp over http assigns agent per session and task lifecycle works without a
         summary: "Completed by session-bound agent"
       }
     });
+
+    const submitContextResult = await client.callTool({
+      name: "submit_task_context",
+      arguments: {
+        taskId: requestContent.task.id,
+        messages: ["HTTP completion note", "Additional recovered context"]
+      }
+    });
+    const submitContext = submitContextResult.structuredContent as {
+      status: string;
+      indexedArtifacts: number;
+      outcome: string;
+    };
+    assert.ok(!submitContextResult.isError, `submit_task_context should succeed, got: ${JSON.stringify(submitContextResult)}`);
+    assert.equal(submitContext.status, "ok");
+    assert.equal(submitContext.indexedArtifacts, 1);
+    assert.equal(submitContext.outcome, "success");
+    assert.deepEqual(learningRuns, [
+      {
+        taskId: requestContent.task.id,
+        projectId: createdProject.id,
+        summary: "HTTP completion note\n\nAdditional recovered context",
+        outcome: "success"
+      }
+    ]);
 
     const getTaskResult = await client.callTool({
       name: "get_task",

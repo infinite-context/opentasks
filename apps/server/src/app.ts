@@ -224,7 +224,8 @@ export function createApp(overrides?: Partial<AppEnv>): App {
         taskResolutionService,
         dashboardQueryService,
         agentService,
-        mcpLogStore
+        mcpLogStore,
+        learningLoop
       })
     : null;
 
@@ -243,7 +244,8 @@ export function createApp(overrides?: Partial<AppEnv>): App {
           taskResolutionService,
           dashboardQueryService,
           agentService,
-          mcpLogStore
+          mcpLogStore,
+          learningLoop
         })
       : undefined;
 

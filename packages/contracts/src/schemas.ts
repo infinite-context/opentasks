@@ -242,6 +242,12 @@ export const taskReleaseSchema = z.object({
   metadata: metadataSchema.optional()
 });
 
+export const submitTaskContextInputSchema = z.object({
+  taskId: z.string().min(1),
+  messages: z.array(z.string()),
+  summary: z.string().optional()
+});
+
 export const contextPacketSchema = z.object({
   taskId: z.string().min(1),
   items: z.array(retrievedContextItemSchema),

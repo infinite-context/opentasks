@@ -5,6 +5,7 @@ import type { AgentService } from "../../system/agent-service";
 import type { DashboardQueryService } from "../../system/dashboard-query-service";
 import type { ExecutionLoop } from "../../system/execution-loop/execution-loop";
 import type { GoalService } from "../../system/goal-service";
+import type { LearningLoop } from "../../system/learning-loop";
 import type { ProjectService } from "../../system/project-service";
 import type { SessionService } from "../../system/session-service";
 import type { TaskService } from "../../system/task-service";
@@ -27,6 +28,7 @@ interface CreateMcpTransportParams {
   dashboardQueryService: DashboardQueryService;
   agentService: AgentService;
   mcpLogStore?: McpLogStore;
+  learningLoop?: LearningLoop | null;
 }
 
 export function createMcpTransport(params: CreateMcpTransportParams): McpTransport {
