@@ -1,6 +1,7 @@
 import type { Logger } from "../../infra/logging";
-import type { TaskRequest } from "@opentasks/contracts";
+import type { ContextPacket, TaskRequest } from "@opentasks/contracts";
 import { issueResult, okResult } from "../service-result";
+import type { ContextHydrator } from "../context-hydrator";
 import type { GoalService } from "../goal-service";
 import type { TaskListManager } from "../task-list-manager";
 import type { ValidationService } from "../validation-service";
@@ -11,6 +12,7 @@ interface CreateTaskOrchestratorParams {
   validationService: ValidationService;
   goalService: GoalService;
   taskListManager: TaskListManager;
+  contextHydrator?: ContextHydrator | null;
   defaultLeaseDurationSeconds: number;
 }
 
@@ -19,6 +21,7 @@ export function createTaskOrchestrator({
   validationService,
   goalService,
   taskListManager,
+  contextHydrator,
   defaultLeaseDurationSeconds
 }: CreateTaskOrchestratorParams): TaskOrchestrator {
   return {
@@ -70,6 +73,19 @@ export function createTaskOrchestrator({
         );
       }
 
+      let hydratedContext: ContextPacket | null = null;
+      if (contextHydrator) {
+        try {
+          const hydratedTask = await contextHydrator.hydrateTask(task);
+          hydratedContext = hydratedTask.context;
+        } catch (error: unknown) {
+          logger.info(
+            "task-orchestrator",
+            `Context hydration failed for task "${task.id}": ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+
       logger.step(
         "task-orchestrator",
         `Task orchestrator returns claimed task "${task.id}" from goal "${goal.id}".`
@@ -78,7 +94,8 @@ export function createTaskOrchestrator({
       return okResult(`Claimed task ${task.id} for ${task.assignedTo}.`, {
         ...projectValidation.context,
         goal,
-        task
+        task,
+        hydratedContext
       });
     }
   };

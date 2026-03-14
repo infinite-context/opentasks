@@ -186,6 +186,7 @@ export function createApp(overrides?: Partial<AppEnv>): App {
     validationService,
     goalService,
     taskListManager,
+    contextHydrator,
     defaultLeaseDurationSeconds: env.defaultLeaseDurationSeconds
   });
   const executionLoop = createExecutionLoop({

@@ -281,6 +281,7 @@ export interface OperationContextDto {
   goals?: GoalRecord[];
   goalSummary?: string;
   task?: TaskRecord | ClaimedTask | null;
+  hydratedContext?: ContextPacket | null;
   events?: TaskEvent[];
   input?: CreateProjectInput;
   field?: string;

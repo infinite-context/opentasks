@@ -432,8 +432,13 @@ export const operationContextDtoSchema = z.object({
   projects: z.array(projectRecordSchema).optional(),
   goal: goalRecordSchema.nullable().optional(),
   goals: z.array(goalRecordSchema).optional(),
+  goalSummary: z.string().optional(),
   task: z.union([taskRecordSchema, claimedTaskSchema]).nullable().optional(),
-  events: z.array(taskEventSchema).optional()
+  hydratedContext: contextPacketSchema.nullable().optional(),
+  events: z.array(taskEventSchema).optional(),
+  input: createProjectInputSchema.optional(),
+  field: z.string().optional(),
+  resolvedPath: z.string().optional()
 });
 
 export const operationResultDtoSchema = z.object({
