@@ -8,6 +8,7 @@ import type {
   TaskRelease
 } from "@opentasks/contracts";
 import { issueResult, okResult } from "../service-result";
+import type { LearningLoop } from "../learning-loop";
 import type { ValidationService } from "../validation-service";
 
 export interface TaskService {
@@ -26,13 +27,15 @@ interface CreateTaskServiceParams {
   taskStore: TaskStore;
   validationService: ValidationService;
   defaultLeaseDurationSeconds: number;
+  learningLoop?: LearningLoop | null;
 }
 
 export function createTaskService({
   logger,
   taskStore,
   validationService,
-  defaultLeaseDurationSeconds
+  defaultLeaseDurationSeconds,
+  learningLoop = null
 }: CreateTaskServiceParams): TaskService {
   return {
     async createTask(input: CreateTaskInput): Promise<OperationResultDto> {
@@ -122,6 +125,24 @@ export function createTaskService({
           ["Make sure the task is assigned to the requesting agent before calling complete_task."],
           validationResult.context
         );
+      }
+
+      if (learningLoop) {
+        void Promise.resolve()
+          .then(() =>
+            learningLoop.run({
+              taskId: task.id,
+              projectId: task.projectId,
+              summary: completion.summary,
+              outcome: "success"
+            })
+          )
+          .catch((error: unknown) => {
+            logger.info(
+              "task-service",
+              `Learning loop failed for task "${task.id}": ${error instanceof Error ? error.message : String(error)}`
+            );
+          });
       }
 
       return okResult(`Task ${task.id} completed.`, { task });
