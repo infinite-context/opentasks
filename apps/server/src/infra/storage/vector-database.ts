@@ -2,9 +2,11 @@ import type { Logger } from "../logging";
 import type { MemoryArtifact, RetrievedContextItem } from "@opentasks/contracts";
 
 export interface VectorSearchQuery {
+  text: string;
   projectId: string;
   goalId?: string;
   taskId?: string;
+  limit?: number;
 }
 
 export interface VectorDatabase {
@@ -12,16 +14,18 @@ export interface VectorDatabase {
   upsert(artifacts: MemoryArtifact[]): Promise<void>;
 }
 
-interface CreateVectorDatabaseParams {
+interface CreateInMemoryVectorDatabaseParams {
   logger: Logger;
 }
 
-export function createVectorDatabase({ logger }: CreateVectorDatabaseParams): VectorDatabase {
+export function createInMemoryVectorDatabase({
+  logger
+}: CreateInMemoryVectorDatabaseParams): VectorDatabase {
   return {
     async search(query: VectorSearchQuery): Promise<RetrievedContextItem[]> {
       logger.step(
         "storage:vector-db",
-        `Vector database returns reusable context candidates for project \"${query.projectId}\".`
+        `In-memory vector database returns reusable context candidates for project \"${query.projectId}\" using semantic text \"${query.text}\".`
       );
 
       const projectScopedItems: RetrievedContextItem[] = [
@@ -87,15 +91,17 @@ export function createVectorDatabase({ logger }: CreateVectorDatabaseParams): Ve
         }
       ];
 
-      return projectScopedItems.map((item) => ({
-        ...item,
-        score:
-          item.taskId && query.taskId && item.taskId === query.taskId
-            ? 1
-            : item.goalId && query.goalId && item.goalId === query.goalId
-              ? 0.9
-              : item.score ?? 0.75
-      }));
+      return projectScopedItems
+        .map((item) => ({
+          ...item,
+          score:
+            item.taskId && query.taskId && item.taskId === query.taskId
+              ? 1
+              : item.goalId && query.goalId && item.goalId === query.goalId
+                ? 0.9
+                : item.score ?? 0.75
+        }))
+        .slice(0, query.limit ?? projectScopedItems.length);
     },
     async upsert(artifacts: MemoryArtifact[]): Promise<void> {
       logger.step(

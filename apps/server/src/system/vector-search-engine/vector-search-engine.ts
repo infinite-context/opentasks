@@ -20,6 +20,7 @@ export function createVectorSearchEngine({
       );
 
       const candidates = await vectorDatabase.search({
+        text: `${task.title}\n${task.description}`,
         projectId: task.projectId,
         goalId: task.goalId,
         taskId: task.id
