@@ -7,6 +7,7 @@ import { loadEnv } from "./infra/config";
 import { createLogger } from "./infra/logging";
 import { createNoopEmbeddingProvider } from "./infra/providers/noop-embedding-provider";
 import { createNoopModelProvider } from "./infra/providers/noop-model-provider";
+import { createOllamaEmbeddingProvider } from "./infra/providers/ollama-embedding-provider";
 import { createOpenAiEmbeddingProvider } from "./infra/providers/openai-embedding-provider";
 import { createOpenRouterProvider } from "./infra/providers/openrouter-provider";
 import { createInMemoryAgentStore } from "./infra/storage/in-memory-agent-store";
@@ -41,6 +42,7 @@ import { createMcpHttpHandler } from "./transport/mcp/mcp-http";
 import { createMcpTransport } from "./transport/mcp";
 
 import type { AppEnv } from "./infra/config";
+import type { EmbeddingProvider } from "./infra/providers/embedding-provider";
 
 export interface App {
   run(): Promise<void>;
@@ -106,18 +108,7 @@ export function createApp(overrides?: Partial<AppEnv>): App {
     modelProviderService
   });
 
-  const embeddingProvider = env.embeddingApiKey
-    ? createOpenAiEmbeddingProvider({
-        logger,
-        apiUrl: env.embeddingApiUrl,
-        apiKey: env.embeddingApiKey,
-        model: env.embeddingModel,
-        dimensions: env.embeddingDimensions
-      })
-    : createNoopEmbeddingProvider({
-        logger,
-        dimensions: env.embeddingDimensions
-      });
+  const embeddingProvider = createEmbeddingProvider(env, logger);
   const vectorDatabaseMode = sqliteDb ? "sqlite-vec" : "in-memory";
   const vectorDatabase = sqliteDb
     ? createSqliteVecDatabase({
@@ -268,36 +259,78 @@ export function createApp(overrides?: Partial<AppEnv>): App {
 
   return {
     async run(): Promise<void> {
-      logger.section("Bootstrap");
-      logger.info("bootstrap", `Starting ${env.appName} backend in ${env.environment} mode.`);
-      logger.info("bootstrap", `Using ${env.storageDriver} task storage.`);
-      logger.info(
-        "bootstrap",
-        `Learning pipeline: model=${modelProvider.name}, embeddings=${embeddingProvider.name}, vectorDb=${vectorDatabaseMode}.`
-      );
+      try {
+        logger.section("Bootstrap");
+        logger.info("bootstrap", `Starting ${env.appName} backend in ${env.environment} mode.`);
+        logger.info("bootstrap", `Using ${env.storageDriver} task storage.`);
+        logger.info(
+          "bootstrap",
+          `Learning pipeline: model=${modelProvider.name}, embeddings=${embeddingProvider.name}, vectorDb=${vectorDatabaseMode}.`
+        );
 
-      if (mcpTransport) {
-        await mcpTransport.start();
-      }
-      if (httpTransport) {
-        await httpTransport.start();
-      }
-      if (mcpTransport) {
-        logger.info("bootstrap", "OpenTasks MCP server is ready for task lifecycle requests (stdio).");
-      }
-      if (mcpOverHttp) {
-        logger.info("bootstrap", "OpenTasks MCP server is ready over HTTP at /mcp.");
-      }
-      if (httpTransport) {
-        logger.info("bootstrap", "OpenTasks HTTP server is ready for dashboard requests.");
-      }
+        await validateEmbeddingProvider(embeddingProvider, logger);
 
-      await waitForShutdownSignal();
-      await httpTransport?.close();
-      await mcpTransport?.close();
-      db?.close();
+        if (mcpTransport) {
+          await mcpTransport.start();
+        }
+        if (httpTransport) {
+          await httpTransport.start();
+        }
+        if (mcpTransport) {
+          logger.info("bootstrap", "OpenTasks MCP server is ready for task lifecycle requests (stdio).");
+        }
+        if (mcpOverHttp) {
+          logger.info("bootstrap", "OpenTasks MCP server is ready over HTTP at /mcp.");
+        }
+        if (httpTransport) {
+          logger.info("bootstrap", "OpenTasks HTTP server is ready for dashboard requests.");
+        }
+
+        await waitForShutdownSignal();
+      } finally {
+        await httpTransport?.close();
+        await mcpTransport?.close();
+        db?.close();
+      }
     }
   };
+}
+
+function createEmbeddingProvider(env: AppEnv, logger: ReturnType<typeof createLogger>): EmbeddingProvider {
+  switch (env.embeddingProvider) {
+    case "ollama":
+      return createOllamaEmbeddingProvider({
+        logger,
+        baseUrl: env.ollamaBaseUrl,
+        model: env.embeddingModel,
+        dimensions: env.embeddingDimensions
+      });
+    case "openai-compatible":
+      return createOpenAiEmbeddingProvider({
+        logger,
+        apiUrl: env.embeddingApiUrl,
+        apiKey: env.embeddingApiKey,
+        model: env.embeddingModel,
+        dimensions: env.embeddingDimensions
+      });
+    case "noop":
+      return createNoopEmbeddingProvider({
+        logger,
+        dimensions: env.embeddingDimensions
+      });
+  }
+}
+
+async function validateEmbeddingProvider(
+  embeddingProvider: EmbeddingProvider,
+  logger: ReturnType<typeof createLogger>
+): Promise<void> {
+  if (!embeddingProvider.validate) {
+    return;
+  }
+
+  logger.info("bootstrap", `Validating ${embeddingProvider.name} embedding provider.`);
+  await embeddingProvider.validate();
 }
 
 async function waitForShutdownSignal(): Promise<void> {

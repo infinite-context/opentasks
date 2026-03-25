@@ -54,7 +54,8 @@ That is the core interaction model of the system.
 ### Prerequisites
 - Node.js (v20+ recommended)
 - npm (bundled with Node.js)
-- Vector Database (configuration pending)
+- Ollama installed locally
+- `embeddinggemma` pulled into Ollama: `ollama pull embeddinggemma`
 - OpenRouter API Key (for the internal indexing agent)
 
 ### Installation
@@ -70,10 +71,25 @@ That is the core interaction model of the system.
    npm install
    ```
 
-3. Start the development server:
+3. Configure the learning pipeline in `apps/server/.env`:
+   ```env
+   OPENTASKS_EMBEDDING_PROVIDER=ollama
+   OLLAMA_BASE_URL=http://localhost:11434
+   OLLAMA_EMBEDDING_MODEL=embeddinggemma
+   OLLAMA_EMBEDDING_DIMENSIONS=256
+
+   OPENROUTER_API_KEY=your-openrouter-key
+   OPENROUTER_MODEL=google/gemini-2.0-flash-001
+   ```
+
+4. Start Ollama if it is not already running.
+
+5. Start the development server:
    ```bash
    npm run dev
    ```
+
+If Ollama is unavailable or `embeddinggemma` is missing, OpenTasks now fails fast at startup with an actionable setup error instead of silently falling back to fake embeddings.
 
 ### MCP (Cursor / Claude Desktop)
 

@@ -13,6 +13,12 @@ export function createNoopEmbeddingProvider({
   return {
     name: "noop",
     dimensions,
+    async validate(): Promise<void> {
+      logger.info(
+        "provider:embedding",
+        "Using noop embeddings. Retrieval quality checks are disabled in this mode."
+      );
+    },
     async embed(): Promise<number[]> {
       logger.info(
         "provider:embedding",

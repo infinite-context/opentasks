@@ -1,13 +1,17 @@
+export type EmbeddingProviderMode = "ollama" | "noop" | "openai-compatible";
+
 export interface AppEnv {
   appName: string;
   appVersion: string;
   environment: string;
   mcpEnabled: boolean;
   mcpOverHttp: boolean;
+  embeddingProvider: EmbeddingProviderMode;
   embeddingApiUrl: string;
   embeddingApiKey: string | null;
   embeddingModel: string;
   embeddingDimensions: number;
+  ollamaBaseUrl: string;
   openrouterApiKey: string | null;
   openrouterModel: string;
   openrouterApiUrl: string;
@@ -21,6 +25,7 @@ export interface AppEnv {
 
 export function loadEnv(): AppEnv {
   const databaseUrl = process.env.OPENTASKS_DATABASE_URL ?? process.env.DATABASE_URL ?? "./data/opentasks.db";
+  const embeddingProvider = resolveEmbeddingProvider(process.env.OPENTASKS_EMBEDDING_PROVIDER);
 
   return {
     appName: process.env.OPENTASKS_APP_NAME ?? "opentasks",
@@ -28,10 +33,18 @@ export function loadEnv(): AppEnv {
     environment: process.env.NODE_ENV ?? "development",
     mcpEnabled: parseBoolean(process.env.OPENTASKS_MCP_ENABLED, true),
     mcpOverHttp: parseBoolean(process.env.OPENTASKS_MCP_OVER_HTTP, true),
+    embeddingProvider,
     embeddingApiUrl: process.env.EMBEDDING_API_URL ?? "https://api.openai.com/v1/embeddings",
     embeddingApiKey: process.env.EMBEDDING_API_KEY ?? null,
-    embeddingModel: process.env.EMBEDDING_MODEL ?? "text-embedding-3-small",
-    embeddingDimensions: parseInteger(process.env.EMBEDDING_DIMENSIONS, 256),
+    embeddingModel:
+      process.env.OLLAMA_EMBEDDING_MODEL
+      ?? process.env.EMBEDDING_MODEL
+      ?? (embeddingProvider === "openai-compatible" ? "text-embedding-3-small" : "embeddinggemma"),
+    embeddingDimensions: parseInteger(
+      process.env.OLLAMA_EMBEDDING_DIMENSIONS ?? process.env.EMBEDDING_DIMENSIONS,
+      256
+    ),
+    ollamaBaseUrl: normalizeBaseUrl(process.env.OLLAMA_BASE_URL ?? "http://localhost:11434"),
     openrouterApiKey: process.env.OPENROUTER_API_KEY ?? null,
     openrouterModel: process.env.OPENROUTER_MODEL ?? "google/gemini-2.0-flash-001",
     openrouterApiUrl: process.env.OPENROUTER_API_URL ?? "https://openrouter.ai/api/v1/chat/completions",
@@ -60,6 +73,20 @@ function parseInteger(value: string | undefined, fallback: number): number {
 
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function resolveEmbeddingProvider(value: string | undefined): EmbeddingProviderMode {
+  const normalized = value?.trim().toLowerCase();
+
+  if (normalized === "noop" || normalized === "openai-compatible" || normalized === "ollama") {
+    return normalized;
+  }
+
+  return "ollama";
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/+$/, "");
 }
 
 function resolveStorageDriver(databaseUrl: string | null): "memory" | "sqlite" {

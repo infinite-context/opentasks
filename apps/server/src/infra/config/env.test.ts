@@ -3,6 +3,10 @@ import test from "node:test";
 import { loadEnv } from "./env";
 
 const EMBEDDING_ENV_KEYS = [
+  "OPENTASKS_EMBEDDING_PROVIDER",
+  "OLLAMA_BASE_URL",
+  "OLLAMA_EMBEDDING_MODEL",
+  "OLLAMA_EMBEDDING_DIMENSIONS",
   "EMBEDDING_API_URL",
   "EMBEDDING_API_KEY",
   "EMBEDDING_MODEL",
@@ -17,7 +21,7 @@ const OPENROUTER_ENV_KEYS = [
 
 const CONFIG_ENV_KEYS = [...EMBEDDING_ENV_KEYS, ...OPENROUTER_ENV_KEYS] as const;
 
-test("loadEnv returns default embedding configuration", () => {
+test("loadEnv returns default Ollama embedding configuration", () => {
   const originalEnv = snapshotEnv();
 
   try {
@@ -25,9 +29,11 @@ test("loadEnv returns default embedding configuration", () => {
 
     const env = loadEnv();
 
+    assert.equal(env.embeddingProvider, "ollama");
+    assert.equal(env.ollamaBaseUrl, "http://localhost:11434");
     assert.equal(env.embeddingApiUrl, "https://api.openai.com/v1/embeddings");
     assert.equal(env.embeddingApiKey, null);
-    assert.equal(env.embeddingModel, "text-embedding-3-small");
+    assert.equal(env.embeddingModel, "embeddinggemma");
     assert.equal(env.embeddingDimensions, 256);
     assert.equal(env.openrouterApiKey, null);
     assert.equal(env.openrouterModel, "google/gemini-2.0-flash-001");
@@ -37,21 +43,43 @@ test("loadEnv returns default embedding configuration", () => {
   }
 });
 
-test("loadEnv parses embedding overrides from process env", () => {
+test("loadEnv parses Ollama embedding overrides from process env", () => {
   const originalEnv = snapshotEnv();
 
   try {
-    process.env.EMBEDDING_API_URL = "https://embeddings.example.test/v1";
-    process.env.EMBEDDING_API_KEY = "secret";
-    process.env.EMBEDDING_MODEL = "custom-model";
-    process.env.EMBEDDING_DIMENSIONS = "384";
+    process.env.OPENTASKS_EMBEDDING_PROVIDER = "ollama";
+    process.env.OLLAMA_BASE_URL = "http://ollama.local:11434/";
+    process.env.OLLAMA_EMBEDDING_MODEL = "embeddinggemma";
+    process.env.OLLAMA_EMBEDDING_DIMENSIONS = "384";
 
     const env = loadEnv();
 
+    assert.equal(env.embeddingProvider, "ollama");
+    assert.equal(env.ollamaBaseUrl, "http://ollama.local:11434");
+    assert.equal(env.embeddingModel, "embeddinggemma");
+    assert.equal(env.embeddingDimensions, 384);
+  } finally {
+    restoreEnv(originalEnv);
+  }
+});
+
+test("loadEnv preserves the legacy OpenAI-compatible embedding mode when selected explicitly", () => {
+  const originalEnv = snapshotEnv();
+
+  try {
+    process.env.OPENTASKS_EMBEDDING_PROVIDER = "openai-compatible";
+    process.env.EMBEDDING_API_URL = "https://embeddings.example.test/v1";
+    process.env.EMBEDDING_API_KEY = "secret";
+    process.env.EMBEDDING_MODEL = "custom-model";
+    process.env.EMBEDDING_DIMENSIONS = "512";
+
+    const env = loadEnv();
+
+    assert.equal(env.embeddingProvider, "openai-compatible");
     assert.equal(env.embeddingApiUrl, "https://embeddings.example.test/v1");
     assert.equal(env.embeddingApiKey, "secret");
     assert.equal(env.embeddingModel, "custom-model");
-    assert.equal(env.embeddingDimensions, 384);
+    assert.equal(env.embeddingDimensions, 512);
   } finally {
     restoreEnv(originalEnv);
   }
