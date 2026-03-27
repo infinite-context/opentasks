@@ -1,6 +1,8 @@
+import { loadServerEnvFile } from "./bootstrap/load-server-env-file";
 import { createApp } from "./app";
 
 async function main(): Promise<void> {
+  loadServerEnvFile();
   const app = createApp();
   await app.run();
 }
