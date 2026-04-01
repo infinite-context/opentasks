@@ -131,7 +131,15 @@ export interface HydratedTask extends TaskRecord {
 export interface CompletedRun {
   taskId: string;
   projectId: string;
+  projectName: string;
+  projectDescription: string;
+  goalId: string;
+  goalName: string;
+  goalDescription: string;
+  taskTitle: string;
+  taskDescription: string;
   summary: string;
+  messages: string[];
   outcome: TaskOutcome;
 }
 
@@ -146,6 +154,8 @@ export interface ModelResponse {
 
 export interface TaskDetailDto {
   task: TaskRecord | ClaimedTask | null;
+  goal: GoalRecord | null;
+  project: ProjectRecord | null;
   events: TaskEvent[];
 }
 

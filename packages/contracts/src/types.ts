@@ -91,6 +91,8 @@ export interface TaskEvent extends IdentityModel {
 
 export interface MemoryArtifact extends IdentityModel {
   taskId: string;
+  kind: RetrievedContextItemKind;
+  content: string;
   summary: string;
   source: "contextual-indexing";
 }

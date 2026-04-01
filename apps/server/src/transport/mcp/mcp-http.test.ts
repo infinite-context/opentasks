@@ -74,7 +74,7 @@ test("mcp over http assigns agent per session and task lifecycle works without a
     taskStore
   });
   const dashboardQueryService = createDashboardQueryService({ logger, taskStore });
-  const learningRuns: Array<{ taskId: string; projectId: string; summary: string; outcome: string }> = [];
+  const learningRuns: Array<Parameters<LearningLoop["run"]>[0]> = [];
   const learningLoop: LearningLoop = {
     async run(run: Parameters<LearningLoop["run"]>[0]) {
       learningRuns.push(run);
@@ -82,6 +82,8 @@ test("mcp over http assigns agent per session and task lifecycle works without a
         {
           id: `artifact-${learningRuns.length}`,
           taskId: run.taskId,
+          kind: "run_note",
+          content: run.summary,
           summary: run.summary,
           source: "contextual-indexing"
         }
@@ -135,7 +137,9 @@ test("mcp over http assigns agent per session and task lifecycle works without a
         workingDirectory: "."
       }
     });
-    const createdProject = (startSessionResult.structuredContent as { project: { id: string; key: string } }).project;
+    const createdProject = (startSessionResult.structuredContent as {
+      project: { id: string; key: string; name: string; description: string };
+    }).project;
     assert.ok(createdProject);
     assert.ok(createdProject.id);
 
@@ -211,7 +215,15 @@ test("mcp over http assigns agent per session and task lifecycle works without a
       {
         taskId: requestContent.task.id,
         projectId: createdProject.id,
+        projectName: createdProject.name,
+        projectDescription: createdProject.description,
+        goalId: createdGoal.id,
+        goalName: "HTTP Goal",
+        goalDescription: "",
+        taskTitle: "Task for session-bound agent",
+        taskDescription: "Should be assigned to session agent without passing agentName",
         summary: "HTTP completion note\n\nAdditional recovered context",
+        messages: ["HTTP completion note", "Additional recovered context"],
         outcome: "success"
       }
     ]);

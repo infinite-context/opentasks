@@ -107,6 +107,8 @@ export const taskEventSchema = z.object({
 export const memoryArtifactSchema = z.object({
   id: z.string().min(1),
   taskId: z.string().min(1),
+  kind: retrievedContextItemKindSchema,
+  content: z.string().min(1),
   summary: z.string().min(1),
   source: z.literal("contextual-indexing")
 });
@@ -261,7 +263,15 @@ export const hydratedTaskSchema = taskRecordSchema.extend({
 export const completedRunSchema = z.object({
   taskId: z.string().min(1),
   projectId: z.string().min(1),
+  projectName: z.string(),
+  projectDescription: z.string(),
+  goalId: z.string().min(1),
+  goalName: z.string(),
+  goalDescription: z.string(),
+  taskTitle: z.string().min(1),
+  taskDescription: z.string(),
   summary: z.string().min(1),
+  messages: z.array(z.string()),
   outcome: taskOutcomeSchema
 });
 
@@ -276,6 +286,8 @@ export const modelResponseSchema = z.object({
 
 export const taskDetailDtoSchema = z.object({
   task: z.union([taskRecordSchema, claimedTaskSchema]).nullable(),
+  goal: goalRecordSchema.nullable(),
+  project: projectRecordSchema.nullable(),
   events: z.array(taskEventSchema)
 });
 

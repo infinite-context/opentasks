@@ -1,5 +1,5 @@
 import type { Logger } from "../../infra/logging";
-import type { TaskStore } from "../../infra/storage/task-store";
+import type { CoordinationStore } from "../../infra/storage/task-store";
 import type {
   TaskSearchDependencyDto,
   TaskListQuery,
@@ -11,7 +11,7 @@ import type { TaskQueryService } from "./types";
 
 interface CreateTaskQueryServiceParams {
   logger: Logger;
-  taskStore: TaskStore;
+  taskStore: CoordinationStore;
 }
 
 export function createTaskQueryService({
@@ -26,8 +26,24 @@ export function createTaskQueryService({
         taskStore.listTaskEvents(taskId)
       ]);
 
+      if (!task) {
+        return {
+          task: null,
+          goal: null,
+          project: null,
+          events
+        };
+      }
+
+      const [goal, project] = await Promise.all([
+        taskStore.getGoal(task.goalId),
+        taskStore.getProject(task.projectId)
+      ]);
+
       return {
         task,
+        goal,
+        project,
         events
       };
     },
@@ -110,7 +126,7 @@ function parseTimestamp(value: string): number | null {
 
 async function analyzeTaskReadiness(
   task: TaskRecord,
-  taskStore: TaskStore,
+  taskStore: CoordinationStore,
   taskCache: Map<string, TaskRecord>
 ): Promise<{
   claimable: boolean;
@@ -128,7 +144,7 @@ async function analyzeTaskReadiness(
 
 async function inspectDependencies(
   task: TaskRecord,
-  taskStore: TaskStore,
+  taskStore: CoordinationStore,
   taskCache: Map<string, TaskRecord>,
   ancestry: Set<string>
 ): Promise<{
@@ -178,7 +194,7 @@ async function inspectDependencies(
 
 async function getTaskRecordById(
   taskId: string,
-  taskStore: TaskStore,
+  taskStore: CoordinationStore,
   taskCache: Map<string, TaskRecord>
 ): Promise<TaskRecord | null> {
   const cachedTask = taskCache.get(taskId);

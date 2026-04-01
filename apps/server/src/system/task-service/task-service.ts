@@ -1,5 +1,5 @@
 import type { Logger } from "../../infra/logging";
-import type { TaskStore } from "../../infra/storage/task-store";
+import type { CoordinationStore } from "../../infra/storage/task-store";
 import type {
   CreateTaskInput,
   OperationResultDto,
@@ -9,6 +9,7 @@ import type {
 } from "@opentasks/contracts";
 import { issueResult, okResult } from "../service-result";
 import type { LearningLoop } from "../learning-loop";
+import { buildCompletedRun, serializeRunMetadata } from "../learning-loop/completed-run";
 import type { ValidationService } from "../validation-service";
 
 export interface TaskService {
@@ -24,7 +25,7 @@ export interface TaskService {
 
 interface CreateTaskServiceParams {
   logger: Logger;
-  taskStore: TaskStore;
+  taskStore: CoordinationStore;
   validationService: ValidationService;
   defaultLeaseDurationSeconds: number;
   learningLoop?: LearningLoop | null;
@@ -129,14 +130,23 @@ export function createTaskService({
 
       if (learningLoop) {
         void Promise.resolve()
-          .then(() =>
-            learningLoop.run({
-              taskId: task.id,
-              projectId: task.projectId,
-              summary: completion.summary,
-              outcome: "success"
-            })
-          )
+          .then(async () => {
+            const [goal, project] = await Promise.all([
+              taskStore.getGoal(task.goalId),
+              taskStore.getProject(task.projectId)
+            ]);
+
+            return learningLoop.run(
+              buildCompletedRun({
+                task,
+                goal,
+                project,
+                summary: completion.summary,
+                messages: serializeRunMetadata(completion.metadata),
+                outcome: "success"
+              })
+            );
+          })
           .catch((error: unknown) => {
             logger.info(
               "task-service",
@@ -162,6 +172,33 @@ export function createTaskService({
           ["Make sure the task is assigned to the requesting agent before calling fail_task."],
           validationResult.context
         );
+      }
+
+      if (learningLoop) {
+        void Promise.resolve()
+          .then(async () => {
+            const [goal, project] = await Promise.all([
+              taskStore.getGoal(task.goalId),
+              taskStore.getProject(task.projectId)
+            ]);
+
+            return learningLoop.run(
+              buildCompletedRun({
+                task,
+                goal,
+                project,
+                summary: failure.error,
+                messages: serializeRunMetadata(failure.metadata),
+                outcome: "failure"
+              })
+            );
+          })
+          .catch((error: unknown) => {
+            logger.info(
+              "task-service",
+              `Learning loop failed for task "${task.id}": ${error instanceof Error ? error.message : String(error)}`
+            );
+          });
       }
 
       return okResult(`Task ${task.id} marked as failed.`, { task });
@@ -215,9 +252,17 @@ export function createTaskService({
         return validationResult;
       }
 
-      const events = await taskStore.listTaskEvents(taskId);
+      const task = validationResult.context?.task ?? null;
+      const [events, goal, project] = await Promise.all([
+        taskStore.listTaskEvents(taskId),
+        task ? taskStore.getGoal(task.goalId) : Promise.resolve(null),
+        task ? taskStore.getProject(task.projectId) : Promise.resolve(null)
+      ]);
+
       return okResult(`Loaded task ${taskId} with ${events.length} lifecycle event(s).`, {
-        task: validationResult.context?.task ?? null,
+        task,
+        goal,
+        project,
         events
       });
     }

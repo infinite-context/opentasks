@@ -59,12 +59,12 @@ async function createReadyTaskService(logger: Logger, learningLoop?: LearningLoo
   assert.equal((await taskService.claimTaskById(task.id, "agent-one")).status, "ok");
   assert.equal((await taskService.startTask(task.id, "agent-one")).status, "ok");
 
-  return { project, task, taskService };
+  return { project, goal, task, taskService };
 }
 
 test("task service triggers the learning loop asynchronously after completion", async () => {
   const { logger, infos } = createTestLogger();
-  const runs: Array<{ taskId: string; projectId: string; summary: string; outcome: string }> = [];
+  const runs: Array<Parameters<LearningLoop["run"]>[0]> = [];
   let resolveRun: (artifacts: MemoryArtifact[]) => void = () => {};
 
   const learningLoop: LearningLoop = {
@@ -76,7 +76,7 @@ test("task service triggers the learning loop asynchronously after completion", 
     }
   };
 
-  const { project, task, taskService } = await createReadyTaskService(logger, learningLoop);
+  const { project, goal, task, taskService } = await createReadyTaskService(logger, learningLoop);
   const resultPromise = taskService.completeTask(task.id, "agent-one", {
     summary: "Completed successfully"
   });
@@ -97,8 +97,71 @@ test("task service triggers the learning loop asynchronously after completion", 
     {
       taskId: task.id,
       projectId: project.id,
+      projectName: project.name,
+      projectDescription: project.description,
+      goalId: goal.id,
+      goalName: goal.name,
+      goalDescription: goal.description,
+      taskTitle: task.title,
+      taskDescription: task.description,
       summary: "Completed successfully",
+      messages: [],
       outcome: "success"
+    }
+  ]);
+  assert.ok(!infos.some((message) => message.includes("Learning loop failed")));
+
+  resolveRun([]);
+});
+
+test("task service triggers the learning loop asynchronously after failure", async () => {
+  const { logger, infos } = createTestLogger();
+  const runs: Array<Parameters<LearningLoop["run"]>[0]> = [];
+  let resolveRun: (artifacts: MemoryArtifact[]) => void = () => {};
+
+  const learningLoop: LearningLoop = {
+    async run(run) {
+      runs.push(run);
+      return await new Promise<MemoryArtifact[]>((resolve) => {
+        resolveRun = resolve;
+      });
+    }
+  };
+
+  const { project, goal, task, taskService } = await createReadyTaskService(logger, learningLoop);
+  const resultPromise = taskService.failTask(task.id, "agent-one", {
+    error: "Compilation failed",
+    metadata: {
+      stderr: "TS2304"
+    }
+  });
+
+  const returnedBeforeImmediate = await Promise.race([
+    resultPromise.then(() => true),
+    waitForImmediate().then(() => false)
+  ]);
+
+  assert.equal(returnedBeforeImmediate, true);
+
+  const result = await resultPromise;
+  assert.equal(result.status, "ok");
+
+  await waitForImmediate();
+
+  assert.deepEqual(runs, [
+    {
+      taskId: task.id,
+      projectId: project.id,
+      projectName: project.name,
+      projectDescription: project.description,
+      goalId: goal.id,
+      goalName: goal.name,
+      goalDescription: goal.description,
+      taskTitle: task.title,
+      taskDescription: task.description,
+      summary: "Compilation failed",
+      messages: ['Structured metadata:\n{\n  "stderr": "TS2304"\n}'],
+      outcome: "failure"
     }
   ]);
   assert.ok(!infos.some((message) => message.includes("Learning loop failed")));

@@ -25,6 +25,7 @@ import type { DashboardQueryService } from "../../system/dashboard-query-service
 import type { ExecutionLoop } from "../../system/execution-loop/execution-loop";
 import type { GoalService } from "../../system/goal-service";
 import type { LearningLoop } from "../../system/learning-loop";
+import { buildCompletedRun } from "../../system/learning-loop/completed-run";
 import type { ProjectService } from "../../system/project-service";
 import type { SessionService } from "../../system/session-service";
 import type { TaskService } from "../../system/task-service";
@@ -503,7 +504,7 @@ export function registerMcpTools(
         });
       }
 
-      const { task } = await taskQueryService.getTaskDetail(args.taskId);
+      const { task, goal, project } = await taskQueryService.getTaskDetail(args.taskId);
       if (!task) {
         return toolResponse({
           status: "task_not_found",
@@ -522,13 +523,20 @@ export function registerMcpTools(
         });
       }
 
-      const summary = args.summary ?? args.messages.join("\n\n");
-      const artifacts = await learningLoop.run({
-        taskId: task.id,
-        projectId: task.projectId,
-        summary,
-        outcome
-      });
+      const summary =
+        args.summary?.trim() ||
+        args.messages.map((message) => message.trim()).filter((message) => message.length > 0).join("\n\n") ||
+        `Task ${task.id} ended with outcome ${outcome}.`;
+      const artifacts = await learningLoop.run(
+        buildCompletedRun({
+          task,
+          goal,
+          project,
+          summary,
+          messages: args.messages,
+          outcome
+        })
+      );
 
       return toolResponse({
         status: "ok",

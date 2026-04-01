@@ -163,11 +163,18 @@ test("submit_task_context rejects non-terminal tasks", async () => {
 });
 
 test("submit_task_context indexes submitted context for completed and failed tasks", async () => {
-  const runs: Array<{ taskId: string; projectId: string; summary: string; outcome: string }> = [];
+  const runs: Array<Parameters<LearningLoop["run"]>[0]> = [];
   const learningLoop: LearningLoop = {
     async run(run: Parameters<LearningLoop["run"]>[0]) {
       runs.push(run);
-      return [{ id: `artifact-${runs.length}`, taskId: run.taskId, summary: run.summary, source: "contextual-indexing" }];
+      return [{
+        id: `artifact-${runs.length}`,
+        taskId: run.taskId,
+        kind: "run_note",
+        content: run.summary,
+        summary: run.summary,
+        source: "contextual-indexing"
+      }];
     }
   };
   const { submitTaskContext, taskService, taskStore, projectId, goalId } =
@@ -211,13 +218,29 @@ test("submit_task_context indexes submitted context for completed and failed tas
     {
       taskId: completedTask.id,
       projectId,
+      projectName: "MCP Tools Project",
+      projectDescription: "Project for MCP tool tests",
+      goalId,
+      goalName: "MCP Tools Goal",
+      goalDescription: "",
+      taskTitle: completedTask.title,
+      taskDescription: completedTask.description,
       summary: "First note\n\nSecond note",
+      messages: ["First note", "Second note"],
       outcome: "success"
     },
     {
       taskId: failedTask.id,
       projectId,
+      projectName: "MCP Tools Project",
+      projectDescription: "Project for MCP tool tests",
+      goalId,
+      goalName: "MCP Tools Goal",
+      goalDescription: "",
+      taskTitle: failedTask.title,
+      taskDescription: failedTask.description,
       summary: "Custom failure summary",
+      messages: ["Failure note"],
       outcome: "failure"
     }
   ]);

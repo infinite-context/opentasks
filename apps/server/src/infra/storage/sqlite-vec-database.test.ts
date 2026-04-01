@@ -50,6 +50,8 @@ test("sqlite vec database keeps a stable metadata row for repeated external ids"
     createArtifact({
       id: "artifact_alpha",
       taskId: "task_alpha",
+      kind: "run_note",
+      content: "alpha context v1",
       summary: "alpha context v1"
     })
   ]);
@@ -64,6 +66,8 @@ test("sqlite vec database keeps a stable metadata row for repeated external ids"
     createArtifact({
       id: "artifact_alpha",
       taskId: "task_alpha",
+      kind: "run_note",
+      content: "alpha context v2",
       summary: "alpha context v2"
     })
   ]);
@@ -116,11 +120,15 @@ test("sqlite vec database returns structured run_note items scoped to the reques
     createArtifact({
       id: "artifact_alpha",
       taskId: "task_alpha",
+      kind: "instruction",
+      content: "alpha implementation note",
       summary: "alpha implementation note"
     }),
     createArtifact({
       id: "artifact_beta",
       taskId: "task_beta",
+      kind: "instruction",
+      content: "alpha implementation note",
       summary: "alpha implementation note"
     })
   ]);
@@ -136,13 +144,13 @@ test("sqlite vec database returns structured run_note items scoped to the reques
   assert.equal(results.length, 1);
   assert.deepEqual(results[0], {
     id: "artifact_alpha",
-    kind: "run_note",
+    kind: "instruction",
     projectId: "project_alpha",
     goalId: "goal_alpha",
     taskId: "task_alpha",
     content: "alpha implementation note",
     summary: "alpha implementation note",
-    tags: ["contextual-indexing", "run-note"],
+    tags: ["contextual-indexing", "instruction"],
     score: 1
   });
 
@@ -175,6 +183,8 @@ test("sqlite vec database swallows embedding and sqlite-vec failures", async () 
       createArtifact({
         id: "artifact_alpha",
         taskId: "task_alpha",
+        kind: "run_note",
+        content: "alpha implementation note",
         summary: "alpha implementation note"
       })
     ])
@@ -200,6 +210,8 @@ test("sqlite vec database swallows embedding and sqlite-vec failures", async () 
       createArtifact({
         id: "artifact_alpha",
         taskId: "task_alpha",
+        kind: "run_note",
+        content: "alpha implementation note",
         summary: "alpha implementation note"
       })
     ])
@@ -249,6 +261,8 @@ function createArtifact(overrides: Partial<MemoryArtifact> = {}): MemoryArtifact
   return {
     id: "artifact_default",
     taskId: "task_alpha",
+    kind: "run_note",
+    content: "alpha implementation note",
     summary: "alpha implementation note",
     source: "contextual-indexing",
     ...overrides

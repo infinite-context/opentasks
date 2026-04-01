@@ -20,6 +20,7 @@ interface SearchRow {
   projectId: string;
   goalId: string | null;
   taskId: string;
+  kind: RetrievedContextItem["kind"];
   content: string;
   summary: string | null;
   distance: number | null;
@@ -30,6 +31,7 @@ interface PersistableArtifact {
   taskId: string;
   goalId: string;
   projectId: string;
+  kind: MemoryArtifact["kind"];
   content: string;
   summary: string;
   source: MemoryArtifact["source"];
@@ -71,7 +73,7 @@ export function createSqliteVecDatabase({
           }
 
           const embedding = normalizeEmbedding(
-            await embeddingProvider.embed(artifact.summary),
+            await embeddingProvider.embed(resolveArtifactEmbeddingText(artifact)),
             embeddingProvider.dimensions
           );
 
@@ -80,7 +82,8 @@ export function createSqliteVecDatabase({
             taskId: artifact.taskId,
             goalId: taskScope.goalId,
             projectId: taskScope.projectId,
-            content: artifact.summary,
+            kind: artifact.kind,
+            content: artifact.content,
             summary: artifact.summary,
             source: artifact.source,
             embedding
@@ -110,7 +113,7 @@ export function createSqliteVecDatabase({
               summary,
               source
             )
-            VALUES (?, ?, ?, ?, 'run_note', ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(external_id) DO UPDATE SET
               task_id = excluded.task_id,
               goal_id = excluded.goal_id,
@@ -132,6 +135,7 @@ export function createSqliteVecDatabase({
               row.taskId,
               row.goalId,
               row.projectId,
+              row.kind,
               row.content,
               row.summary,
               row.source
@@ -175,6 +179,7 @@ export function createSqliteVecDatabase({
             memory_artifacts.project_id AS projectId,
             memory_artifacts.goal_id AS goalId,
             memory_artifacts.task_id AS taskId,
+            memory_artifacts.kind AS kind,
             memory_artifacts.content AS content,
             memory_artifacts.summary AS summary,
             distance
@@ -212,15 +217,19 @@ export function createSqliteVecDatabase({
 function mapSearchRowToRetrievedItem(row: SearchRow): RetrievedContextItem {
   return {
     id: row.externalId,
-    kind: "run_note",
+    kind: row.kind,
     projectId: row.projectId,
     goalId: row.goalId,
     taskId: row.taskId,
     content: row.content,
     summary: row.summary,
-    tags: ["contextual-indexing", "run-note"],
+    tags: ["contextual-indexing", row.kind.replace(/_/g, "-")],
     score: scoreFromDistance(row.distance)
   };
+}
+
+function resolveArtifactEmbeddingText(artifact: MemoryArtifact): string {
+  return `${artifact.summary}\n\n${artifact.content}`.trim();
 }
 
 function normalizeEmbedding(embedding: number[], dimensions: number): number[] {
