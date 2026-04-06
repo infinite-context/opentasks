@@ -78,7 +78,12 @@ function buildArtifactGenerationPrompt(run: CompletedRun): string {
     },
     outcome: run.outcome,
     terminalSummary: run.summary,
-    submittedMessages: run.messages
+    submittedContextDump: run.contextDump,
+    submittedMessages: run.messages,
+    filesTouched: run.filesTouched,
+    errors: run.errors,
+    commands: run.commands,
+    decisions: run.decisions
   };
 
   return [
@@ -152,7 +157,12 @@ function createDeterministicRunNote(run: CompletedRun): MemoryArtifact {
     `Task: ${run.taskTitle}.`,
     run.taskDescription ? `Task description: ${run.taskDescription}` : "",
     `Terminal summary: ${run.summary}`,
-    ...run.messages.map((message, index) => `Supplemental note ${index + 1}: ${message}`)
+    run.contextDump ? `Submitted context dump: ${run.contextDump}` : "",
+    ...run.messages.map((message, index) => `Supplemental note ${index + 1}: ${message}`),
+    ...run.filesTouched.map((filePath, index) => `File touched ${index + 1}: ${filePath}`),
+    ...run.errors.map((error, index) => `Observed error ${index + 1}: ${error}`),
+    ...run.commands.map((command, index) => `Command ${index + 1}: ${command}`),
+    ...run.decisions.map((decision, index) => `Decision ${index + 1}: ${decision}`)
   ].filter((value) => value.length > 0);
 
   const summary = truncate(

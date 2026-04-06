@@ -40,6 +40,34 @@ test("session service creates project when none exists", async () => {
     assert.equal(result.context.project.workingDirectory, tmpDir);
     assert.ok(result.context.project.key.length > 0);
     assert.ok(result.context.project.key === result.context.project.key.toLowerCase());
+    assert.equal(result.context.clientCapability, "black_box");
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("session service echoes explicit client capability", async () => {
+  const tmpDir = join(tmpdir(), `opentasks-session-test-${randomUUID()}`);
+  mkdirSync(tmpDir, { recursive: true });
+  try {
+    const taskStore = createInMemoryTaskStore({ logger });
+    const validationService = createValidationService({
+      logger,
+      store: taskStore,
+      projectPath: tmpdir()
+    });
+    const sessionService = createSessionService({
+      logger,
+      projectStore: taskStore,
+      goalStore: taskStore,
+      validationService,
+      projectPath: tmpdir()
+    });
+
+    const result = await sessionService.startSession(tmpDir, "owned_runtime");
+
+    assert.equal(result.status, "ok");
+    assert.equal(result.context?.clientCapability, "owned_runtime");
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }

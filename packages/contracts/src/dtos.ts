@@ -1,4 +1,5 @@
 import type {
+  ClientRuntimeCapability,
   ClaimedTask,
   GoalRecord,
   MemoryArtifact,
@@ -118,6 +119,25 @@ export interface SubmitTaskContextInput {
   summary?: string;
 }
 
+export interface SubmitRunContextInput {
+  taskId: string;
+  summary: string;
+  outcome: TaskOutcome;
+  context?: string;
+  messages?: string[];
+  filesTouched?: string[];
+  errors?: string[];
+  commands?: string[];
+  decisions?: string[];
+}
+
+export interface StartSessionInput {
+  workingDirectory: string;
+  client?: {
+    capability?: ClientRuntimeCapability;
+  };
+}
+
 export interface ContextPacket {
   taskId: string;
   items: RetrievedContextItem[];
@@ -139,7 +159,12 @@ export interface CompletedRun {
   taskTitle: string;
   taskDescription: string;
   summary: string;
+  contextDump: string | null;
   messages: string[];
+  filesTouched: string[];
+  errors: string[];
+  commands: string[];
+  decisions: string[];
   outcome: TaskOutcome;
 }
 
@@ -302,6 +327,7 @@ export interface OperationContextDto {
   input?: CreateProjectInput;
   field?: string;
   resolvedPath?: string;
+  clientCapability?: ClientRuntimeCapability;
 }
 
 export interface OperationResultDto {

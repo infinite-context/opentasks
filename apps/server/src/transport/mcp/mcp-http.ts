@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import type { ClientRuntimeCapability } from "@opentasks/contracts";
 import { MCP_SERVER_INSTRUCTIONS } from "./mcp-instructions.js";
 import { registerMcpTools } from "./mcp-tools.js";
 import type { McpToolsServices } from "./mcp-tools.js";
@@ -23,6 +24,7 @@ interface SessionEntry {
   transport: StreamableHTTPServerTransport;
   server: McpServer;
   agent: AgentRecord;
+  capability: ClientRuntimeCapability;
 }
 
 /**
@@ -37,17 +39,25 @@ export function createMcpHttpHandler(params: CreateMcpHttpHandlerParams): {
   const { logger, appName, appVersion, agentService, mcpLogStore, ...services } = params;
   const sessions = new Map<string, SessionEntry>();
 
-  function getAgentForRequest(
-    _args: { agentName?: string },
-    extra?: { sessionId?: string; requestInfo?: { headers?: Record<string, string | string[] | undefined> } }
-  ): Promise<string> {
-    const sessionId =
+  function resolveSessionId(extra?: {
+    sessionId?: string;
+    requestInfo?: { headers?: Record<string, string | string[] | undefined> };
+  }): string | null {
+    return (
       extra?.sessionId ??
       (typeof extra?.requestInfo?.headers?.["mcp-session-id"] === "string"
         ? extra.requestInfo.headers["mcp-session-id"]
         : Array.isArray(extra?.requestInfo?.headers?.["mcp-session-id"])
           ? extra.requestInfo.headers["mcp-session-id"][0]
-          : undefined);
+          : null)
+    );
+  }
+
+  function getAgentForRequest(
+    _args: { agentName?: string },
+    extra?: { sessionId?: string; requestInfo?: { headers?: Record<string, string | string[] | undefined> } }
+  ): Promise<string> {
+    const sessionId = resolveSessionId(extra);
     if (!sessionId) {
       return Promise.reject(
         new Error("No session ID. Ensure the client has completed MCP initialization.")
@@ -60,12 +70,53 @@ export function createMcpHttpHandler(params: CreateMcpHttpHandlerParams): {
     return Promise.resolve(entry.agent.displayName);
   }
 
+  function getClientCapabilityForRequest(
+    extra?: { sessionId?: string; requestInfo?: { headers?: Record<string, string | string[] | undefined> } }
+  ): Promise<ClientRuntimeCapability> {
+    const sessionId = resolveSessionId(extra);
+    if (!sessionId) {
+      return Promise.resolve("black_box");
+    }
+
+    const entry = sessions.get(sessionId);
+    if (!entry) {
+      return Promise.resolve("black_box");
+    }
+
+    return Promise.resolve(entry.capability);
+  }
+
+  function setClientCapabilityForRequest(
+    capability: ClientRuntimeCapability,
+    extra?: { sessionId?: string; requestInfo?: { headers?: Record<string, string | string[] | undefined> } }
+  ): Promise<void> {
+    const sessionId = resolveSessionId(extra);
+    if (!sessionId) {
+      return Promise.resolve();
+    }
+
+    const entry = sessions.get(sessionId);
+    if (!entry) {
+      return Promise.resolve();
+    }
+
+    entry.capability = capability;
+    return Promise.resolve();
+  }
+
   function createServer(): McpServer {
     const server = new McpServer(
       { name: appName, version: appVersion },
       { instructions: MCP_SERVER_INSTRUCTIONS }
     );
-    registerMcpTools(server, { ...services, getAgentForRequest, logStore: mcpLogStore, agentService });
+    registerMcpTools(server, {
+      ...services,
+      getAgentForRequest,
+      getClientCapabilityForRequest,
+      setClientCapabilityForRequest,
+      logStore: mcpLogStore,
+      agentService
+    });
     return server;
   }
 
@@ -111,7 +162,7 @@ export function createMcpHttpHandler(params: CreateMcpHttpHandlerParams): {
               name: clientInfo?.name,
               version: clientInfo?.version
             });
-            sessions.set(sid, { transport, server, agent });
+            sessions.set(sid, { transport, server, agent, capability: "black_box" });
             logger.info("transport:mcp-http", `Session ${sid} bound to agent ${agent.displayName}.`);
           }
         });

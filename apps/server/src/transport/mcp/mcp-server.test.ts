@@ -46,6 +46,7 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     assert.ok(toolNames.includes("fail_task"));
     assert.ok(toolNames.includes("release_task"));
     assert.ok(toolNames.includes("get_task"));
+    assert.ok(toolNames.includes("submit_run_context"));
     assert.ok(toolNames.includes("start_session"));
     assert.ok(toolNames.includes("update_project"));
     assert.ok(!toolNames.includes("create_project"));
@@ -58,9 +59,11 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     });
     const createdProject = startSessionResult.structuredContent as {
       project: { id: string; key: string };
+      clientCapability: string;
     };
     assert.ok(createdProject.project);
     assert.ok(createdProject.project.id);
+    assert.equal(createdProject.clientCapability, "black_box");
 
     const createGoalResult = await client.callTool({
       name: "create_goal",

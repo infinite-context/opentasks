@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { SubmitTaskContextInput } from "@opentasks/contracts";
+import type {
+  ClientRuntimeCapability,
+  SubmitRunContextInput,
+  SubmitTaskContextInput
+} from "@opentasks/contracts";
 import type { Logger } from "../../infra/logging";
 import { createInMemoryTaskStore } from "../../infra/storage/in-memory-task-store";
 import type { LearningLoop } from "../../system/learning-loop";
@@ -17,8 +21,8 @@ const logger: Logger = {
 };
 
 type RegisteredTool = {
-  inputSchema: { parse(value: unknown): SubmitTaskContextInput };
-  handler: (args: SubmitTaskContextInput) => Promise<unknown>;
+  inputSchema: { parse(value: unknown): unknown };
+  handler: (args: unknown, extra?: unknown) => Promise<unknown>;
 };
 
 function getRegisteredTool(server: McpServer, name: string): RegisteredTool {
@@ -36,10 +40,16 @@ async function createTaskFixture(
     structuredContent: Record<string, unknown>;
     isError?: boolean;
   }>;
+  submitRunContext: (args: SubmitRunContextInput) => Promise<{
+    content: Array<{ type: "text"; text: string }>;
+    structuredContent: Record<string, unknown>;
+    isError?: boolean;
+  }>;
   taskService: ReturnType<typeof createTaskService>;
   taskStore: ReturnType<typeof createInMemoryTaskStore>;
   projectId: string;
   goalId: string;
+  setClientCapability: (capability: ClientRuntimeCapability) => void;
 }> {
   const taskStore = createInMemoryTaskStore({ logger });
   const validationService = createValidationService({ logger, store: taskStore });
@@ -67,6 +77,7 @@ async function createTaskFixture(
   assert.ok(goal);
 
   const server = new McpServer({ name: "opentasks-test", version: "0.1.0" });
+  let clientCapability: ClientRuntimeCapability = "black_box";
   registerMcpTools(server, {
     projectService: {} as never,
     sessionService: {} as never,
@@ -77,10 +88,15 @@ async function createTaskFixture(
     taskResolutionService: {} as never,
     dashboardQueryService: {} as never,
     learningLoop,
-    getAgentForRequest: async () => "agent-one"
+    getAgentForRequest: async () => "agent-one",
+    getClientCapabilityForRequest: async () => clientCapability,
+    setClientCapabilityForRequest: async (capability) => {
+      clientCapability = capability;
+    }
   });
 
   const tool = getRegisteredTool(server, "submit_task_context");
+  const runContextTool = getRegisteredTool(server, "submit_run_context");
 
   return {
     submitTaskContext: async (args) => {
@@ -91,10 +107,21 @@ async function createTaskFixture(
         isError?: boolean;
       };
     },
+    submitRunContext: async (args) => {
+      const parsedArgs = runContextTool.inputSchema.parse(args);
+      return (await runContextTool.handler(parsedArgs)) as {
+        content: Array<{ type: "text"; text: string }>;
+        structuredContent: Record<string, unknown>;
+        isError?: boolean;
+      };
+    },
     taskService,
     taskStore,
     projectId: project.id,
-    goalId: goal.id
+    goalId: goal.id,
+    setClientCapability: (capability) => {
+      clientCapability = capability;
+    }
   };
 }
 
@@ -226,7 +253,12 @@ test("submit_task_context indexes submitted context for completed and failed tas
       taskTitle: completedTask.title,
       taskDescription: completedTask.description,
       summary: "First note\n\nSecond note",
+      contextDump: null,
       messages: ["First note", "Second note"],
+      filesTouched: [],
+      errors: [],
+      commands: [],
+      decisions: [],
       outcome: "success"
     },
     {
@@ -240,7 +272,105 @@ test("submit_task_context indexes submitted context for completed and failed tas
       taskTitle: failedTask.title,
       taskDescription: failedTask.description,
       summary: "Custom failure summary",
+      contextDump: null,
       messages: ["Failure note"],
+      filesTouched: [],
+      errors: [],
+      commands: [],
+      decisions: [],
+      outcome: "failure"
+    }
+  ]);
+});
+
+test("submit_run_context rejects black-box capability", async () => {
+  const learningLoop: LearningLoop = {
+    async run() {
+      return [];
+    }
+  };
+  const { submitRunContext, taskService, taskStore, projectId, goalId } = await createTaskFixture(learningLoop);
+  const task = await createTaskForFixture(taskStore, projectId, goalId, "Owned runtime only task");
+  assert.equal((await taskService.claimTaskById(task.id, "agent-one")).status, "ok");
+  assert.equal((await taskService.startTask(task.id, "agent-one")).status, "ok");
+  assert.equal((await taskService.completeTask(task.id, "agent-one", { summary: "Finished" })).status, "ok");
+
+  const result = await submitRunContext({
+    taskId: task.id,
+    summary: "Detailed run summary",
+    outcome: "success",
+    messages: ["A richer runtime note"]
+  });
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.status, "invalid_input");
+  assert.equal(result.structuredContent.clientCapability, "black_box");
+});
+
+test("submit_run_context indexes richer evidence for owned-runtime sessions", async () => {
+  const runs: Array<Parameters<LearningLoop["run"]>[0]> = [];
+  const learningLoop: LearningLoop = {
+    async run(run: Parameters<LearningLoop["run"]>[0]) {
+      runs.push(run);
+      return [{
+        id: `artifact-${runs.length}`,
+        taskId: run.taskId,
+        kind: "run_note",
+        content: run.summary,
+        summary: run.summary,
+        source: "contextual-indexing"
+      }];
+    }
+  };
+
+  const {
+    submitRunContext,
+    taskService,
+    taskStore,
+    projectId,
+    goalId,
+    setClientCapability
+  } = await createTaskFixture(learningLoop);
+  setClientCapability("owned_runtime");
+
+  const task = await createTaskForFixture(taskStore, projectId, goalId, "Owned runtime context task");
+  assert.equal((await taskService.claimTaskById(task.id, "agent-one")).status, "ok");
+  assert.equal((await taskService.startTask(task.id, "agent-one")).status, "ok");
+  assert.equal((await taskService.failTask(task.id, "agent-one", { error: "Underlying error" })).status, "ok");
+
+  const result = await submitRunContext({
+    taskId: task.id,
+    summary: "Browser agent found a stable selector after a redirect.",
+    outcome: "failure",
+    context: "The run hit a login redirect before the target page stabilized.",
+    messages: ["Wait for the authenticated redirect before looking up the table rows."],
+    filesTouched: ["apps/web/src/routes/dashboard.tsx"],
+    errors: ["Initial selector lookup timed out."],
+    commands: ["open dashboard and wait for auth redirect"],
+    decisions: ["Prefer the stable data-testid selector over text matching."]
+  });
+
+  assert.equal(result.isError, false);
+  assert.equal(result.structuredContent.status, "ok");
+  assert.equal(result.structuredContent.indexedArtifacts, 1);
+  assert.deepEqual(runs, [
+    {
+      taskId: task.id,
+      projectId,
+      projectName: "MCP Tools Project",
+      projectDescription: "Project for MCP tool tests",
+      goalId,
+      goalName: "MCP Tools Goal",
+      goalDescription: "",
+      taskTitle: task.title,
+      taskDescription: task.description,
+      summary: "Browser agent found a stable selector after a redirect.",
+      contextDump: "The run hit a login redirect before the target page stabilized.",
+      messages: ["Wait for the authenticated redirect before looking up the table rows."],
+      filesTouched: ["apps/web/src/routes/dashboard.tsx"],
+      errors: ["Initial selector lookup timed out."],
+      commands: ["open dashboard and wait for auth redirect"],
+      decisions: ["Prefer the stable data-testid selector over text matching."],
       outcome: "failure"
     }
   ]);

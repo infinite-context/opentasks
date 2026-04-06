@@ -138,8 +138,14 @@ test("mcp over http assigns agent per session and task lifecycle works without a
       }
     });
     const createdProject = (startSessionResult.structuredContent as {
+      clientCapability: string;
       project: { id: string; key: string; name: string; description: string };
     }).project;
+    const startSessionContent = startSessionResult.structuredContent as {
+      clientCapability: string;
+      project: { id: string; key: string; name: string; description: string };
+    };
+    assert.equal(startSessionContent.clientCapability, "black_box");
     assert.ok(createdProject);
     assert.ok(createdProject.id);
 
@@ -223,7 +229,12 @@ test("mcp over http assigns agent per session and task lifecycle works without a
         taskTitle: "Task for session-bound agent",
         taskDescription: "Should be assigned to session agent without passing agentName",
         summary: "HTTP completion note\n\nAdditional recovered context",
+        contextDump: null,
         messages: ["HTTP completion note", "Additional recovered context"],
+        filesTouched: [],
+        errors: [],
+        commands: [],
+        decisions: [],
         outcome: "success"
       }
     ]);

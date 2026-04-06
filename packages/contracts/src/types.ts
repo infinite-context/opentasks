@@ -26,6 +26,7 @@ export type TaskEventType =
   | "task_requeued";
 export type TaskEventActorType = "agent" | "system";
 export type TaskOutcome = "success" | "failure";
+export type ClientRuntimeCapability = "black_box" | "owned_runtime";
 export type RetrievedContextItemKind =
   | "code_chunk"
   | "file_summary"

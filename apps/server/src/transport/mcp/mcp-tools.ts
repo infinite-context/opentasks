@@ -6,6 +6,8 @@ import {
   dashboardQuerySchema,
   goalListQuerySchema,
   projectListQuerySchema,
+  startSessionInputSchema,
+  submitRunContextInputSchema,
   submitTaskContextInputSchema,
   taskActionSchema as sharedTaskActionSchema,
   taskClaimByIdSchema,
@@ -18,7 +20,10 @@ import {
   updateGoalInputSchema,
   updateProjectInputSchema
 } from "@opentasks/contracts/schemas";
-import type { OperationResultDto } from "@opentasks/contracts";
+import type {
+  ClientRuntimeCapability,
+  OperationResultDto
+} from "@opentasks/contracts";
 import type { McpLogStore } from "../../infra/storage/mcp-log-store";
 import type { AgentService } from "../../system/agent-service";
 import type { DashboardQueryService } from "../../system/dashboard-query-service";
@@ -44,6 +49,11 @@ export interface McpToolsServices {
   learningLoop?: LearningLoop | null;
 }
 
+export interface ToolRequestExtra {
+  sessionId?: string;
+  requestInfo?: { headers?: Record<string, string | string[] | undefined> };
+}
+
 /**
  * Resolves the agent identity for the current request. Used by task lifecycle tools.
  * For session-bound transports (HTTP), this returns the session's agent using extra.sessionId
@@ -52,15 +62,24 @@ export interface McpToolsServices {
  */
 export type GetAgentForRequest = (
   args: { agentName?: string },
-  extra?: { sessionId?: string; requestInfo?: { headers?: Record<string, string | string[] | undefined> } }
+  extra?: ToolRequestExtra
 ) => Promise<string>;
+
+export type GetClientCapabilityForRequest = (extra?: ToolRequestExtra) => Promise<ClientRuntimeCapability>;
+export type SetClientCapabilityForRequest = (
+  capability: ClientRuntimeCapability,
+  extra?: ToolRequestExtra
+) => Promise<void>;
 
 export interface RegisterMcpToolsParams extends McpToolsServices {
   getAgentForRequest: GetAgentForRequest;
+  getClientCapabilityForRequest: GetClientCapabilityForRequest;
+  setClientCapabilityForRequest: SetClientCapabilityForRequest;
   logStore?: McpLogStore;
   agentService?: AgentService;
 }
 
+const startSessionInputShape = startSessionInputSchema.shape;
 const requestTaskShape = taskRequestSchema.shape;
 const createTaskInputShape = createTaskInputSchema.shape;
 const updateProjectInputShape = updateProjectInputSchema.shape;
@@ -74,6 +93,7 @@ const dashboardQueryShape = dashboardQuerySchema.shape;
 const taskActionShape = sharedTaskActionSchema.shape;
 const taskClaimByIdShape = taskClaimByIdSchema.shape;
 const submitTaskContextInputShape = submitTaskContextInputSchema.shape;
+const submitRunContextInputShape = submitRunContextInputSchema.shape;
 
 function withLogging<TArgs, TExtra>(
   toolName: string,
@@ -146,7 +166,9 @@ export function registerMcpTools(
     taskQueryService,
     taskResolutionService,
     dashboardQueryService,
-    learningLoop
+    learningLoop,
+    getClientCapabilityForRequest,
+    setClientCapabilityForRequest
   } = services;
 
   const wrap = <TArgs, TExtra>(
@@ -160,11 +182,13 @@ export function registerMcpTools(
       title: "Start Session",
       description:
         "Start or resume a session for a working directory. Call this first with your current working directory root (project/workspace path). Returns the projectId for an existing project (exact or parent path match) or creates a new project.",
-      inputSchema: {
-        workingDirectory: z.string().min(1)
-      }
+      inputSchema: startSessionInputShape
     },
-    wrap("start_session", async (args) => toToolResult(await sessionService.startSession(args.workingDirectory)))
+    wrap("start_session", async (args, extra) => {
+      const clientCapability = args.client?.capability ?? "black_box";
+      await setClientCapabilityForRequest(clientCapability, extra);
+      return toToolResult(await sessionService.startSession(args.workingDirectory, clientCapability));
+    })
   );
 
   server.registerTool(
@@ -552,6 +576,105 @@ export function registerMcpTools(
   );
 
   server.registerTool(
+    "submit_run_context",
+    {
+      title: "Submit Run Context",
+      description:
+        "Submit richer end-of-run context for a completed or failed task so owned runtimes can distill higher-signal memory artifacts.",
+      inputSchema: submitRunContextInputShape
+    },
+    wrap("submit_run_context", async (args, extra) => {
+      if (!learningLoop) {
+        return toolResponse({
+          status: "error",
+          message: "Learning pipeline is not configured.",
+          guidance: ["Configure the learning loop before calling submit_run_context."],
+          isError: true
+        });
+      }
+
+      const clientCapability = await getClientCapabilityForRequest(extra);
+      if (clientCapability !== "owned_runtime") {
+        return toolResponse({
+          status: "invalid_input",
+          message: "submit_run_context is only available to owned-runtime sessions.",
+          guidance: [
+            "Call start_session with client.capability set to owned_runtime before submitting richer run context."
+          ],
+          structuredContent: { clientCapability },
+          isError: true
+        });
+      }
+
+      const { task, goal, project } = await taskQueryService.getTaskDetail(args.taskId);
+      if (!task) {
+        return toolResponse({
+          status: "task_not_found",
+          message: `Task "${args.taskId}" was not found.`,
+          isError: true
+        });
+      }
+
+      const actualOutcome = resolveTaskOutcome(task.status);
+      if (!actualOutcome) {
+        return toolResponse({
+          status: "invalid_transition",
+          message: `Task "${task.id}" must be completed or failed before submitting run context.`,
+          guidance: ["Wait until the task reaches a terminal state, then submit its run context."],
+          isError: true
+        });
+      }
+
+      if (actualOutcome !== args.outcome) {
+        return toolResponse({
+          status: "invalid_input",
+          message: `Task "${task.id}" has outcome ${actualOutcome}, which does not match the submitted outcome ${args.outcome}.`,
+          guidance: ["Submit a run context payload whose outcome matches the task's terminal state."],
+          isError: true
+        });
+      }
+
+      const normalizedMessages = normalizeStringList(args.messages);
+      const normalizedContext = normalizeOptionalString(args.context);
+      const artifacts = await learningLoop.run(
+        buildCompletedRun({
+          task,
+          goal,
+          project,
+          summary: args.summary,
+          outcome: args.outcome,
+          contextDump: normalizedContext,
+          messages: normalizedMessages,
+          filesTouched: normalizeStringList(args.filesTouched),
+          errors: normalizeStringList(args.errors),
+          commands: normalizeStringList(args.commands),
+          decisions: normalizeStringList(args.decisions)
+        })
+      );
+
+      return toolResponse({
+        status: "ok",
+        message: `Indexed ${artifacts.length} artifact(s) from run context for task ${task.id}.`,
+        structuredContent: {
+          taskId: task.id,
+          projectId: task.projectId,
+          outcome: args.outcome,
+          indexedArtifacts: artifacts.length,
+          clientCapability,
+          includedEvidence: {
+            context: normalizedContext != null,
+            messages: normalizedMessages.length,
+            filesTouched: normalizeStringList(args.filesTouched).length,
+            errors: normalizeStringList(args.errors).length,
+            commands: normalizeStringList(args.commands).length,
+            decisions: normalizeStringList(args.decisions).length
+          }
+        }
+      });
+    })
+  );
+
+  server.registerTool(
     "get_task",
     {
       title: "Get Task",
@@ -622,6 +745,17 @@ function resolveTaskOutcome(status: "completed" | "failed" | string): "success" 
   }
 
   return null;
+}
+
+function normalizeStringList(values?: string[]): string[] {
+  return (values ?? [])
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
+function normalizeOptionalString(value?: string): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function renderMessage(result: Pick<OperationResultDto, "message" | "guidance">): string {

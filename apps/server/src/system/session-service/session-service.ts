@@ -2,7 +2,11 @@ import { dirname, resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
 import type { Logger } from "../../infra/logging";
 import type { GoalStore, ProjectStore } from "../../infra/storage/task-store";
-import type { CreateProjectInput, GoalRecord } from "@opentasks/contracts";
+import type {
+  ClientRuntimeCapability,
+  CreateProjectInput,
+  GoalRecord
+} from "@opentasks/contracts";
 import { issueResult, okResult } from "../service-result";
 import type { SessionService } from "./types";
 import type { ValidationService } from "../validation-service";
@@ -83,7 +87,8 @@ export function createSessionService({
   const buildSessionResult = async (
     message: string,
     projectId: string,
-    project: { id: string; name: string }
+    project: { id: string; key: string; name: string; description: string; workingDirectory: string; createdAt: string; updatedAt: string },
+    clientCapability: ClientRuntimeCapability
   ) => {
     const allGoals = await goalStore.listGoals(projectId);
     const openGoals = allGoals.filter(isOpenGoal);
@@ -92,12 +97,16 @@ export function createSessionService({
     return okResult(enhancedMessage, {
       projectId,
       project,
+      clientCapability,
       ...(openGoals.length > 0 && { goals: openGoals, goalSummary })
     });
   };
 
   return {
-    async startSession(workingDirectory: string) {
+    async startSession(
+      workingDirectory: string,
+      clientCapability: ClientRuntimeCapability = "black_box"
+    ) {
       const trimmed = workingDirectory?.trim() ?? "";
       if (!trimmed) {
         return issueResult(
@@ -131,7 +140,8 @@ export function createSessionService({
         return buildSessionResult(
           `Session started. Project "${project.name}" is available.`,
           project.id,
-          project
+          project,
+          clientCapability
         );
       }
 
@@ -144,7 +154,8 @@ export function createSessionService({
           return buildSessionResult(
             `Session started. Project "${project.name}" is available.`,
             project.id,
-            project
+            project,
+            clientCapability
           );
         }
       }
@@ -183,7 +194,8 @@ export function createSessionService({
       return buildSessionResult(
         `Session started. Project "${created.name}" was created.`,
         created.id,
-        created
+        created,
+        clientCapability
       );
     }
   };

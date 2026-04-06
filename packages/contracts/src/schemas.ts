@@ -30,6 +30,7 @@ export const taskEventTypeSchema = z.enum([
 ]);
 export const taskEventActorTypeSchema = z.enum(["agent", "system"]);
 export const taskOutcomeSchema = z.enum(["success", "failure"]);
+export const clientRuntimeCapabilitySchema = z.enum(["black_box", "owned_runtime"]);
 export const retrievedContextItemKindSchema = z.enum([
   "code_chunk",
   "file_summary",
@@ -250,6 +251,36 @@ export const submitTaskContextInputSchema = z.object({
   summary: z.string().optional()
 });
 
+export const submitRunContextInputSchema = z
+  .object({
+    taskId: z.string().min(1),
+    summary: z.string().min(1),
+    outcome: taskOutcomeSchema,
+    context: z.string().optional(),
+    messages: z.array(z.string()).optional(),
+    filesTouched: z.array(z.string()).optional(),
+    errors: z.array(z.string()).optional(),
+    commands: z.array(z.string()).optional(),
+    decisions: z.array(z.string()).optional()
+  })
+  .refine(
+    (value) =>
+      (typeof value.context === "string" && value.context.trim().length > 0) ||
+      (Array.isArray(value.messages) && value.messages.some((message) => message.trim().length > 0)),
+    {
+      message: "Provide context or messages."
+    }
+  );
+
+export const startSessionInputSchema = z.object({
+  workingDirectory: z.string().min(1),
+  client: z
+    .object({
+      capability: clientRuntimeCapabilitySchema.optional()
+    })
+    .optional()
+});
+
 export const contextPacketSchema = z.object({
   taskId: z.string().min(1),
   items: z.array(retrievedContextItemSchema),
@@ -271,7 +302,12 @@ export const completedRunSchema = z.object({
   taskTitle: z.string().min(1),
   taskDescription: z.string(),
   summary: z.string().min(1),
+  contextDump: z.string().nullable(),
   messages: z.array(z.string()),
+  filesTouched: z.array(z.string()),
+  errors: z.array(z.string()),
+  commands: z.array(z.string()),
+  decisions: z.array(z.string()),
   outcome: taskOutcomeSchema
 });
 

@@ -12,7 +12,12 @@ interface BuildCompletedRunParams {
   project: ProjectRecord | null;
   summary: string;
   outcome: TaskOutcome;
+  contextDump?: string | null;
   messages?: string[];
+  filesTouched?: string[];
+  errors?: string[];
+  commands?: string[];
+  decisions?: string[];
 }
 
 export function buildCompletedRun({
@@ -21,7 +26,12 @@ export function buildCompletedRun({
   project,
   summary,
   outcome,
-  messages = []
+  contextDump = null,
+  messages = [],
+  filesTouched = [],
+  errors = [],
+  commands = [],
+  decisions = []
 }: BuildCompletedRunParams): CompletedRun {
   return {
     taskId: task.id,
@@ -33,8 +43,13 @@ export function buildCompletedRun({
     goalDescription: goal?.description ?? "",
     taskTitle: task.title,
     taskDescription: task.description,
-    summary,
+    summary: summary.trim(),
+    contextDump: normalizeOptionalText(contextDump),
     messages: normalizeMessages(messages),
+    filesTouched: normalizeMessages(filesTouched),
+    errors: normalizeMessages(errors),
+    commands: normalizeMessages(commands),
+    decisions: normalizeMessages(decisions),
     outcome
   };
 }
@@ -51,4 +66,9 @@ function normalizeMessages(messages: string[]): string[] {
   return messages
     .map((message) => message.trim())
     .filter((message) => message.length > 0);
+}
+
+function normalizeOptionalText(value?: string | null): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
 }

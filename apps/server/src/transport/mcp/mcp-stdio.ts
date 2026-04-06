@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ClientRuntimeCapability } from "@opentasks/contracts";
 import { MCP_SERVER_INSTRUCTIONS } from "./mcp-instructions.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { AgentService } from "../../system/agent-service";
@@ -22,6 +23,7 @@ export interface CreateMcpStdioTransportParams extends McpToolsServices {
  */
 export function createMcpStdioTransport(params: CreateMcpStdioTransportParams): McpTransport {
   const { logger, appName, appVersion, agentService, mcpLogStore, ...services } = params;
+  let clientCapability: ClientRuntimeCapability = "black_box";
 
   const getAgentForRequest: (args: { agentName?: string }, _extra?: { sessionId?: string }) => Promise<string> = async (args) => {
     if (!args.agentName || args.agentName.trim() === "") {
@@ -37,7 +39,16 @@ export function createMcpStdioTransport(params: CreateMcpStdioTransportParams): 
     { instructions: MCP_SERVER_INSTRUCTIONS }
   );
 
-  registerMcpTools(server, { ...services, getAgentForRequest, logStore: mcpLogStore, agentService });
+  registerMcpTools(server, {
+    ...services,
+    getAgentForRequest,
+    getClientCapabilityForRequest: async () => clientCapability,
+    setClientCapabilityForRequest: async (capability) => {
+      clientCapability = capability;
+    },
+    logStore: mcpLogStore,
+    agentService
+  });
 
   let transport: StdioServerTransport | null = null;
 

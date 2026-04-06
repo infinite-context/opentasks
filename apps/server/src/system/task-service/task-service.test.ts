@@ -105,7 +105,12 @@ test("task service triggers the learning loop asynchronously after completion", 
       taskTitle: task.title,
       taskDescription: task.description,
       summary: "Completed successfully",
+      contextDump: null,
       messages: [],
+      filesTouched: [],
+      errors: [],
+      commands: [],
+      decisions: [],
       outcome: "success"
     }
   ]);
@@ -160,7 +165,12 @@ test("task service triggers the learning loop asynchronously after failure", asy
       taskTitle: task.title,
       taskDescription: task.description,
       summary: "Compilation failed",
+      contextDump: null,
       messages: ['Structured metadata:\n{\n  "stderr": "TS2304"\n}'],
+      filesTouched: [],
+      errors: [],
+      commands: [],
+      decisions: [],
       outcome: "failure"
     }
   ]);

@@ -24,7 +24,12 @@ function createCompletedRun(): CompletedRun {
     taskTitle: "Improve indexing quality",
     taskDescription: "Generate grounded artifacts and skip duplicates.",
     summary: "Implemented grounded artifact generation.",
+    contextDump: null,
     messages: ["Deduplicate repeated notes before storage."],
+    filesTouched: [],
+    errors: [],
+    commands: [],
+    decisions: [],
     outcome: "success"
   };
 }

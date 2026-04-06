@@ -23,7 +23,12 @@ function createCompletedRun(overrides: Partial<CompletedRun> = {}): CompletedRun
     taskTitle: "Improve artifact grounding",
     taskDescription: "Make the generated artifacts reflect the actual completed run.",
     summary: "Updated the artifact-generation prompt to reduce speculation.",
+    contextDump: null,
     messages: ["Added stricter output rules", "Kept retrieval unchanged"],
+    filesTouched: [],
+    errors: [],
+    commands: [],
+    decisions: [],
     outcome: "success",
     ...overrides
   };
@@ -103,7 +108,12 @@ test("internal agent falls back to a deterministic run note when the model respo
     createCompletedRun({
       outcome: "failure",
       summary: "Typecheck still fails on unrelated baseline MCP typing issues.",
-      messages: ["Do not widen scope into unrelated execution bugs."]
+      messages: ["Do not widen scope into unrelated execution bugs."],
+      contextDump: "tsc still fails in baseline MCP typing areas outside this change set.",
+      filesTouched: ["apps/server/src/system/internal-agent/internal-agent.ts"],
+      errors: ["TS2322 in unrelated MCP tooling"],
+      commands: ["npm --workspace=@opentasks/server --silent run typecheck"],
+      decisions: ["Do not widen scope into unrelated execution bugs."]
     })
   );
 
@@ -113,7 +123,7 @@ test("internal agent falls back to a deterministic run note when the model respo
     taskId: "task_alpha",
     kind: "run_note",
     content:
-      'Task outcome: failure.\nTask: Improve artifact grounding.\nTask description: Make the generated artifacts reflect the actual completed run.\nTerminal summary: Typecheck still fails on unrelated baseline MCP typing issues.\nSupplemental note 1: Do not widen scope into unrelated execution bugs.',
+      'Task outcome: failure.\nTask: Improve artifact grounding.\nTask description: Make the generated artifacts reflect the actual completed run.\nTerminal summary: Typecheck still fails on unrelated baseline MCP typing issues.\nSubmitted context dump: tsc still fails in baseline MCP typing areas outside this change set.\nSupplemental note 1: Do not widen scope into unrelated execution bugs.\nFile touched 1: apps/server/src/system/internal-agent/internal-agent.ts\nObserved error 1: TS2322 in unrelated MCP tooling\nCommand 1: npm --workspace=@opentasks/server --silent run typecheck\nDecision 1: Do not widen scope into unrelated execution bugs.',
     summary: "Failed Improve artifact grounding: Typecheck still fails on unrelated baseline MCP typing issues.",
     source: "contextual-indexing"
   });
