@@ -181,7 +181,7 @@ export function registerMcpTools(
     {
       title: "Start Session",
       description:
-        "Start or resume a session for a working directory. Call this first with your current working directory root (project/workspace path). Returns the projectId for an existing project (exact or parent path match) or creates a new project.",
+        "Start or resume a session for a working directory. Call this first with your current working directory root (project/workspace path). Returns the projectId for an existing project (exact or parent path match) or creates a new project.\n\nclient.capability is optional and defaults to black_box. Use black_box for standard external MCP clients such as Codex, Claude Code, Cursor, or any agent that cannot programmatically export structured run evidence. Use owned_runtime only for a custom or wrapped runtime that can reliably submit richer end-of-run evidence through submit_run_context, such as transcript excerpts, commands, files touched, errors, or decisions. Do not choose owned_runtime just because you can summarize your work.",
       inputSchema: startSessionInputShape
     },
     wrap("start_session", async (args, extra) => {

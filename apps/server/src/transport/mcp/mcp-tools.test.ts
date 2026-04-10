@@ -13,6 +13,7 @@ import { createTaskQueryService } from "../../system/task-query-service";
 import { createTaskService } from "../../system/task-service";
 import { createValidationService } from "../../system/validation-service";
 import { registerMcpTools } from "./mcp-tools";
+import { startSessionInputSchema } from "@opentasks/contracts/schemas";
 
 const logger: Logger = {
   section() {},
@@ -21,6 +22,7 @@ const logger: Logger = {
 };
 
 type RegisteredTool = {
+  description?: string;
   inputSchema: { parse(value: unknown): unknown };
   handler: (args: unknown, extra?: unknown) => Promise<unknown>;
 };
@@ -31,6 +33,45 @@ function getRegisteredTool(server: McpServer, name: string): RegisteredTool {
   assert.ok(tool, `Expected tool "${name}" to be registered.`);
   return tool;
 }
+
+test("start_session guidance explains runtime capability selection", () => {
+  const server = new McpServer({ name: "opentasks-test", version: "0.1.0" });
+
+  registerMcpTools(server, {
+    projectService: {} as never,
+    sessionService: {} as never,
+    goalService: {} as never,
+    taskService: {} as never,
+    executionLoop: {} as never,
+    taskQueryService: {} as never,
+    taskResolutionService: {} as never,
+    dashboardQueryService: {} as never,
+    learningLoop: null,
+    getAgentForRequest: async () => "agent-one",
+    getClientCapabilityForRequest: async () => "black_box",
+    setClientCapabilityForRequest: async () => {}
+  });
+
+  const tool = getRegisteredTool(server, "start_session");
+  const description = tool.description ?? "";
+  assert.match(description, /defaults to black_box/);
+  assert.match(description, /Codex/);
+  assert.match(description, /Claude Code/);
+  assert.match(description, /Cursor/);
+  assert.match(description, /submit_run_context/);
+  assert.match(description, /Do not choose owned_runtime just because you can summarize your work/);
+
+  const workingDirectoryDescription = startSessionInputSchema.shape.workingDirectory.description ?? "";
+  const clientDescription = startSessionInputSchema.shape.client.description ?? "";
+  const clientSchema = (startSessionInputSchema.shape.client as { unwrap: () => { shape: { capability: { description?: string } } } }).unwrap();
+  const capabilityDescription = clientSchema.shape.capability.description ?? "";
+
+  assert.match(workingDirectoryDescription, /project\/workspace root/);
+  assert.match(clientDescription, /client\/runtime metadata/);
+  assert.match(capabilityDescription, /Defaults to black_box/);
+  assert.match(capabilityDescription, /standard external agents such as Codex, Claude Code, or Cursor/);
+  assert.match(capabilityDescription, /submit_run_context/);
+});
 
 async function createTaskFixture(
   learningLoop?: LearningLoop | null

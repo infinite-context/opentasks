@@ -273,12 +273,22 @@ export const submitRunContextInputSchema = z
   );
 
 export const startSessionInputSchema = z.object({
-  workingDirectory: z.string().min(1),
+  workingDirectory: z
+    .string()
+    .min(1)
+    .describe("Current project/workspace root. Call start_session before any project-scoped tools."),
   client: z
     .object({
-      capability: clientRuntimeCapabilitySchema.optional()
+      capability: clientRuntimeCapabilitySchema
+        .optional()
+        .describe(
+          "Runtime capability for this MCP session. Defaults to black_box. Use black_box for standard external agents such as Codex, Claude Code, or Cursor. Use owned_runtime only when the client integration programmatically captures structured run evidence and can submit it through submit_run_context."
+        )
     })
     .optional()
+    .describe(
+      "Optional client/runtime metadata used to choose which learning-context submission tools are appropriate."
+    )
 });
 
 export const contextPacketSchema = z.object({
