@@ -38,12 +38,14 @@ System -> improve next task
 That is the core interaction model of the system.
 
 ### 1. The Execution Loop (Doing the work)
+
 1. An external agent requests work via the **MCP Server**.
 2. The **Task Orchestrator** pulls an available task from the SQLite database.
 3. The **Context Hydrator** fetches relevant prior memory from the Vector Search Engine.
 4. The hydrated task is returned to the agent, primed with everything it needs to know.
 
 ### 2. The Learning Loop (Remembering for next time)
+
 1. The external agent completes the task and submits the run context back.
 2. The **Indexer** uses an internal, lower-cost agent to process the completed run.
 3. Relevant knowledge is extracted, vectorized, and stored in the Vector Database.
@@ -52,6 +54,7 @@ That is the core interaction model of the system.
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js (v20+ recommended)
 - npm (bundled with Node.js)
 - Ollama installed locally
@@ -61,17 +64,20 @@ That is the core interaction model of the system.
 ### Installation
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/your-username/opentasks.git
    cd opentasks
    ```
 
 2. Install dependencies:
+
    ```bash
    npm install
    ```
 
 3. Configure the learning pipeline in `apps/server/.env`:
+
    ```env
    OPENTASKS_EMBEDDING_PROVIDER=ollama
    OLLAMA_BASE_URL=http://localhost:11434
@@ -91,9 +97,13 @@ That is the core interaction model of the system.
 
 If Ollama is unavailable or `embeddinggemma` is missing, OpenTasks now fails fast at startup with an actionable setup error instead of silently falling back to fake embeddings.
 
-### MCP (Cursor / Claude Desktop)
+### MCP Setup
 
-To connect OpenTasks as an MCP server, add to your MCP config:
+OpenTasks can be connected to MCP-capable agents in two ways: stdio MCP or Streamable HTTP MCP.
+
+#### stdio MCP
+
+To connect OpenTasks as a stdio MCP server, add this to your MCP config:
 
 ```json
 {
@@ -107,7 +117,54 @@ To connect OpenTasks as an MCP server, add to your MCP config:
 }
 ```
 
-Both the dev server and MCP share the same SQLite database (`data/opentasks.db`), so tasks created via MCP appear in the dashboard automatically.
+With stdio MCP, the agent runtime launches OpenTasks as a child process for the session.
+
+#### Streamable HTTP MCP
+
+To connect through HTTP MCP, start the backend:
+
+```bash
+npm run dev:server
+```
+
+This exposes the Streamable HTTP MCP endpoint at:
+
+```text
+http://localhost:3005/mcp
+```
+
+Register the MCP server URL in your agent runtime. Depending on the client, this can be configured globally or per project:
+
+Codex CLI:
+
+```bash
+codex mcp add opentasks --url http://localhost:3005/mcp
+```
+
+Claude Code (user scope):
+
+```bash
+claude mcp add --transport http --scope user opentasks http://localhost:3005/mcp
+```
+
+After registering the server, restart your agent runtime or start a new session. For Codex, you can verify the registration with:
+
+```bash
+codex mcp list
+codex mcp get opentasks
+```
+
+Other MCP-capable clients should use their equivalent "add MCP server by URL" flow when they support Streamable HTTP MCP.
+
+With HTTP MCP, OpenTasks runs as a shared local server and agent runtimes connect to `http://localhost:3005/mcp`.
+
+After connecting through either transport, the first OpenTasks tool call should be `start_session` with the current workspace root:
+
+```json
+{
+  "workingDirectory": "/path/to/your/project"
+}
+```
 
 ## Documentation
 
