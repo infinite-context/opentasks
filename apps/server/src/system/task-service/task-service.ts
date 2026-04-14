@@ -1,6 +1,7 @@
 import type { Logger } from "../../infra/logging";
 import type { CoordinationStore } from "../../infra/storage/task-store";
 import type {
+  ContextPacket,
   CreateTaskInput,
   OperationResultDto,
   TaskCompletion,
@@ -8,6 +9,7 @@ import type {
   TaskRelease
 } from "@opentasks/contracts";
 import { issueResult, okResult } from "../service-result";
+import type { ContextHydrator } from "../context-hydrator";
 import type { LearningLoop } from "../learning-loop";
 import { buildCompletedRun, serializeRunMetadata } from "../learning-loop/completed-run";
 import type { ValidationService } from "../validation-service";
@@ -28,6 +30,7 @@ interface CreateTaskServiceParams {
   taskStore: CoordinationStore;
   validationService: ValidationService;
   defaultLeaseDurationSeconds: number;
+  contextHydrator?: ContextHydrator | null;
   learningLoop?: LearningLoop | null;
 }
 
@@ -36,6 +39,7 @@ export function createTaskService({
   taskStore,
   validationService,
   defaultLeaseDurationSeconds,
+  contextHydrator = null,
   learningLoop = null
 }: CreateTaskServiceParams): TaskService {
   return {
@@ -90,7 +94,30 @@ export function createTaskService({
         );
       }
 
-      return okResult(`Claimed task ${task.id} for ${task.assignedTo}.`, { task });
+      const [goal, project] = await Promise.all([
+        taskStore.getGoal(task.goalId),
+        taskStore.getProject(task.projectId)
+      ]);
+
+      let hydratedContext: ContextPacket | null = null;
+      if (contextHydrator) {
+        try {
+          const hydratedTask = await contextHydrator.hydrateTask(task);
+          hydratedContext = hydratedTask.context;
+        } catch (error: unknown) {
+          logger.info(
+            "task-service",
+            `Context hydration failed for claimed task "${task.id}": ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+
+      return okResult(`Claimed task ${task.id} for ${task.assignedTo}.`, {
+        project,
+        goal,
+        task,
+        hydratedContext
+      });
     },
     async startTask(taskId: string, agentName: string): Promise<OperationResultDto> {
       logger.step("task-service", `Starting task "${taskId}".`);

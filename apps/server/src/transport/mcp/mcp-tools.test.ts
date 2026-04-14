@@ -71,6 +71,9 @@ test("start_session guidance explains runtime capability selection", () => {
   assert.match(capabilityDescription, /Defaults to black_box/);
   assert.match(capabilityDescription, /standard external agents such as Codex, Claude Code, or Cursor/);
   assert.match(capabilityDescription, /submit_run_context/);
+
+  const claimToolDescription = getRegisteredTool(server, "claim_task_by_id").description ?? "";
+  assert.match(claimToolDescription, /hydrated context/);
 });
 
 async function createTaskFixture(
@@ -82,6 +85,11 @@ async function createTaskFixture(
     isError?: boolean;
   }>;
   submitRunContext: (args: SubmitRunContextInput) => Promise<{
+    content: Array<{ type: "text"; text: string }>;
+    structuredContent: Record<string, unknown>;
+    isError?: boolean;
+  }>;
+  claimTaskById: (args: { taskId: string; agentName?: string; leaseDurationSeconds?: number }) => Promise<{
     content: Array<{ type: "text"; text: string }>;
     structuredContent: Record<string, unknown>;
     isError?: boolean;
@@ -138,6 +146,7 @@ async function createTaskFixture(
 
   const tool = getRegisteredTool(server, "submit_task_context");
   const runContextTool = getRegisteredTool(server, "submit_run_context");
+  const claimTool = getRegisteredTool(server, "claim_task_by_id");
 
   return {
     submitTaskContext: async (args) => {
@@ -151,6 +160,14 @@ async function createTaskFixture(
     submitRunContext: async (args) => {
       const parsedArgs = runContextTool.inputSchema.parse(args);
       return (await runContextTool.handler(parsedArgs)) as {
+        content: Array<{ type: "text"; text: string }>;
+        structuredContent: Record<string, unknown>;
+        isError?: boolean;
+      };
+    },
+    claimTaskById: async (args) => {
+      const parsedArgs = claimTool.inputSchema.parse(args);
+      return (await claimTool.handler(parsedArgs)) as {
         content: Array<{ type: "text"; text: string }>;
         structuredContent: Record<string, unknown>;
         isError?: boolean;
@@ -182,6 +199,24 @@ async function createTaskForFixture(
   assert.ok(task);
   return task;
 }
+
+test("claim_task_by_id returns hydrated context field after a successful claim", async () => {
+  const { claimTaskById, taskStore, projectId, goalId } = await createTaskFixture(null);
+  const task = await createTaskForFixture(taskStore, projectId, goalId, "Explicit claim task");
+
+  const result = await claimTaskById({
+    taskId: task.id,
+    leaseDurationSeconds: 120
+  });
+
+  const claimedTask = result.structuredContent.task as { id: string; status: string; assignedTo: string };
+  assert.equal(result.isError, false);
+  assert.equal(result.structuredContent.status, "ok");
+  assert.equal(claimedTask.id, task.id);
+  assert.equal(claimedTask.status, "assigned");
+  assert.equal(claimedTask.assignedTo, "agent-one");
+  assert.equal(result.structuredContent.hydratedContext, null);
+});
 
 test("submit_task_context returns an error when the learning pipeline is unavailable", async () => {
   const { submitTaskContext } = await createTaskFixture(null);

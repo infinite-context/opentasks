@@ -397,7 +397,7 @@ export function registerMcpTools(
     {
       title: "Claim Task By Id",
       description:
-        "Claim a specific available task by id if it is dependency-ready and belongs to an active goal.",
+        "Claim a specific available task by id if it is dependency-ready and belongs to an active goal. A successful claim returns hydrated context when available.",
       inputSchema: taskClaimByIdShape
     },
     wrap("claim_task_by_id", async (args, extra) => {

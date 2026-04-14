@@ -170,6 +170,7 @@ export function createApp(overrides?: Partial<AppEnv>): App {
     taskStore,
     validationService,
     defaultLeaseDurationSeconds: env.defaultLeaseDurationSeconds,
+    contextHydrator,
     learningLoop
   });
   const taskOrchestrator = createTaskOrchestrator({

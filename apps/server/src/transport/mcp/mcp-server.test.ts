@@ -190,12 +190,14 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     });
     const explicitClaim = explicitClaimResult.structuredContent as {
       task: { id: string; status: string; assignedTo: string } | null;
+      hydratedContext: unknown;
     };
 
     assert.ok(explicitClaim.task);
     assert.equal(explicitClaim.task.id, taskSearch.results[0]?.task.id);
     assert.equal(explicitClaim.task.status, "assigned");
     assert.equal(explicitClaim.task.assignedTo, "agent-explicit");
+    assert.equal(explicitClaim.hydratedContext, null);
 
     const overviewResult = await client.callTool({
       name: "get_project_overview",
