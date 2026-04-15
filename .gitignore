@@ -9,3 +9,7 @@ dist/
 data/
 
 examples/multi-agent-coordination-mcp-main/
+
+# Environment files
+.env
+apps/server/.env
