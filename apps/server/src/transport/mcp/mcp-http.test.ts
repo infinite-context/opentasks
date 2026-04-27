@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { JSONRPCMessageSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Logger } from "../../infra/logging";
 import { createInMemoryAgentStore } from "../../infra/storage/in-memory-agent-store";
 import { createInMemoryTaskStore } from "../../infra/storage/in-memory-task-store";
@@ -28,6 +30,121 @@ const logger: Logger = {
 };
 
 const MCP_HTTP_PORT = 3211;
+
+function createProtocolOnlyMcpHandler() {
+  const agentStore = createInMemoryAgentStore();
+  const agentService = createAgentService({ logger, agentStore });
+
+  return createMcpHttpHandler({
+    logger,
+    appName: "opentasks",
+    appVersion: "0.1.0",
+    projectService: {} as never,
+    sessionService: {} as never,
+    goalService: {} as never,
+    taskService: {} as never,
+    executionLoop: {} as never,
+    taskQueryService: {} as never,
+    taskResolutionService: {} as never,
+    dashboardQueryService: {} as never,
+    agentService
+  });
+}
+
+function createMockRequest(headers: Record<string, string | undefined>): IncomingMessage {
+  return {
+    headers,
+    method: "POST",
+    url: "/mcp",
+    socket: {}
+  } as IncomingMessage;
+}
+
+function createMockResponse(): {
+  res: ServerResponse;
+  body: () => string;
+  header: (name: string) => string | undefined;
+  statusCode: () => number;
+} {
+  const state: {
+    statusCode: number;
+    headersSent: boolean;
+    headers: Map<string, string>;
+    body: string;
+  } = {
+    statusCode: 200,
+    headersSent: false,
+    headers: new Map(),
+    body: ""
+  };
+
+  const res = {
+    get statusCode() {
+      return state.statusCode;
+    },
+    set statusCode(value: number) {
+      state.statusCode = value;
+    },
+    get headersSent() {
+      return state.headersSent;
+    },
+    setHeader(name: string, value: string | number | readonly string[]) {
+      state.headers.set(name.toLowerCase(), Array.isArray(value) ? value.join(", ") : String(value));
+      return res;
+    },
+    end(chunk?: string | Buffer) {
+      if (chunk !== undefined) {
+        state.body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+      }
+      state.headersSent = true;
+      return res;
+    }
+  } as ServerResponse;
+
+  return {
+    res,
+    body: () => state.body,
+    header: (name) => state.headers.get(name.toLowerCase()),
+    statusCode: () => state.statusCode
+  };
+}
+
+test("mcp http stale-session failures remain parseable JSON-RPC", async () => {
+  const handler = createProtocolOnlyMcpHandler();
+  const requestBody = {
+    jsonrpc: "2.0",
+    id: "request-1",
+    method: "tools/call",
+    params: {
+      name: "start_session",
+      arguments: {
+        workingDirectory: "/Users/marcofregoso/Development/nexo"
+      }
+    }
+  };
+
+  const postResponse = createMockResponse();
+  await handler.handlePost(
+    createMockRequest({ "mcp-session-id": "missing-session" }),
+    postResponse.res,
+    requestBody
+  );
+
+  assert.equal(postResponse.statusCode(), 404);
+  assert.equal(postResponse.header("content-type"), "application/json");
+  const postMessage = JSONRPCMessageSchema.parse(JSON.parse(postResponse.body()));
+  assert.equal((postMessage as { id?: unknown }).id, "request-1");
+  assert.equal((postMessage as { error?: { code?: unknown } }).error?.code, -32001);
+
+  const getResponse = createMockResponse();
+  await handler.handleGet(createMockRequest({ "mcp-session-id": "missing-session" }), getResponse.res);
+
+  assert.equal(getResponse.statusCode(), 404);
+  assert.equal(getResponse.header("content-type"), "application/json");
+  const getMessage = JSONRPCMessageSchema.parse(JSON.parse(getResponse.body()));
+  assert.equal((getMessage as { id?: unknown }).id, "opentasks-transport-error");
+  assert.equal((getMessage as { error?: { code?: unknown } }).error?.code, -32001);
+});
 
 test("mcp over http assigns agent per session and task lifecycle works without agentName", async () => {
   const taskStore = createInMemoryTaskStore({ logger });

@@ -27,6 +27,45 @@ interface SessionEntry {
   capability: ClientRuntimeCapability;
 }
 
+type JsonRpcId = string | number;
+
+const TRANSPORT_ERROR_ID = "opentasks-transport-error";
+
+function extractJsonRpcId(body: unknown): JsonRpcId {
+  if (!body || Array.isArray(body) || typeof body !== "object") {
+    return TRANSPORT_ERROR_ID;
+  }
+
+  const id = (body as { id?: unknown }).id;
+  return typeof id === "string" || typeof id === "number" ? id : TRANSPORT_ERROR_ID;
+}
+
+function findInitializeRequest(body: unknown): { params?: Record<string, unknown> } | null {
+  if (Array.isArray(body)) {
+    return (body.find(isInitializeRequest) as { params?: Record<string, unknown> } | undefined) ?? null;
+  }
+
+  return isInitializeRequest(body) ? (body as { params?: Record<string, unknown> }) : null;
+}
+
+function writeJsonRpcError(
+  res: ServerResponse,
+  statusCode: number,
+  code: number,
+  message: string,
+  id: JsonRpcId = TRANSPORT_ERROR_ID
+): void {
+  res.statusCode = statusCode;
+  res.setHeader("Content-Type", "application/json");
+  res.end(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      error: { code, message },
+      id
+    })
+  );
+}
+
 /**
  * Creates the HTTP MCP handler that assigns each session an agent and binds
  * tool calls to that agent without requiring agentName in the request.
@@ -134,8 +173,9 @@ export function createMcpHttpHandler(params: CreateMcpHttpHandlerParams): {
         return;
       }
 
-      if (!sessionId && body && isInitializeRequest(body)) {
-        const initParams = (body as { params?: Record<string, unknown> }).params;
+      const initializeRequest = findInitializeRequest(body);
+      if (body && initializeRequest) {
+        const initParams = initializeRequest.params;
         const clientInfo = initParams?.clientInfo as { name?: string; version?: string } | undefined;
 
         // Log all connection info received from the incoming connection
@@ -181,14 +221,23 @@ export function createMcpHttpHandler(params: CreateMcpHttpHandlerParams): {
         return;
       }
 
-      res.statusCode = 400;
-      res.setHeader("Content-Type", "application/json");
-      res.end(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          error: { code: -32000, message: "Bad Request: No valid session ID or initialization required." },
-          id: null
-        })
+      if (sessionId) {
+        writeJsonRpcError(
+          res,
+          404,
+          -32001,
+          "Session not found. Reinitialize the MCP connection and retry the request.",
+          extractJsonRpcId(body)
+        );
+        return;
+      }
+
+      writeJsonRpcError(
+        res,
+        400,
+        -32000,
+        "Bad Request: No valid session ID or initialization required.",
+        extractJsonRpcId(body)
       );
     } catch (err) {
       logger.info(
@@ -196,15 +245,7 @@ export function createMcpHttpHandler(params: CreateMcpHttpHandlerParams): {
         err instanceof Error ? err.message : String(err)
       );
       if (!res.headersSent) {
-        res.statusCode = 500;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            error: { code: -32603, message: "Internal server error" },
-            id: null
-          })
-        );
+        writeJsonRpcError(res, 500, -32603, "Internal server error", extractJsonRpcId(body));
       }
     }
   }
@@ -212,8 +253,12 @@ export function createMcpHttpHandler(params: CreateMcpHttpHandlerParams): {
   async function handleGet(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     if (!sessionId || !sessions.has(sessionId)) {
-      res.statusCode = 400;
-      res.end("Invalid or missing session ID");
+      writeJsonRpcError(
+        res,
+        sessionId ? 404 : 400,
+        sessionId ? -32001 : -32000,
+        sessionId ? "Session not found." : "Bad Request: Mcp-Session-Id header is required."
+      );
       return;
     }
     const entry = sessions.get(sessionId)!;
@@ -223,8 +268,12 @@ export function createMcpHttpHandler(params: CreateMcpHttpHandlerParams): {
   async function handleDelete(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     if (!sessionId || !sessions.has(sessionId)) {
-      res.statusCode = 400;
-      res.end("Invalid or missing session ID");
+      writeJsonRpcError(
+        res,
+        sessionId ? 404 : 400,
+        sessionId ? -32001 : -32000,
+        sessionId ? "Session not found." : "Bad Request: Mcp-Session-Id header is required."
+      );
       return;
     }
     try {
@@ -237,8 +286,7 @@ export function createMcpHttpHandler(params: CreateMcpHttpHandlerParams): {
         err instanceof Error ? err.message : String(err)
       );
       if (!res.headersSent) {
-        res.statusCode = 500;
-        res.end("Error processing session termination");
+        writeJsonRpcError(res, 500, -32603, "Error processing session termination");
       }
     }
   }
