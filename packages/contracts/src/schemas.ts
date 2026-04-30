@@ -460,6 +460,21 @@ export const dashboardHealthItemDtoSchema = z.object({
   detail: z.string().min(1)
 });
 
+export const dashboardMemoryArtifactSummaryDtoSchema = z.object({
+  id: z.string().min(1),
+  taskId: z.string().min(1),
+  goalId: z.string().min(1),
+  kind: z.string().min(1),
+  summary: z.string().nullable(),
+  createdAt: z.string().min(1)
+});
+
+export const dashboardLearningSummaryDtoSchema = z.object({
+  artifactCount: z.number().int().nonnegative(),
+  recentArtifacts: z.array(dashboardMemoryArtifactSummaryDtoSchema),
+  indexingPolicyNote: z.string().min(1)
+});
+
 export const dashboardSnapshotDtoSchema = z.object({
   generatedAt: z.string().min(1),
   project: projectRecordSchema.nullable(),
@@ -468,7 +483,39 @@ export const dashboardSnapshotDtoSchema = z.object({
   tasks: z.array(taskRecordSchema),
   activity: z.array(dashboardActivityItemDtoSchema),
   agents: z.array(dashboardAgentStatusDtoSchema),
-  health: z.array(dashboardHealthItemDtoSchema)
+  health: z.array(dashboardHealthItemDtoSchema),
+  learning: dashboardLearningSummaryDtoSchema.nullable().optional()
+});
+
+export const memoryListQuerySchema = z.object({
+  projectId: z.string().min(1),
+  limit: z.coerce.number().int().positive().max(500).optional()
+});
+
+export const memorySearchQuerySchema = z.object({
+  projectId: z.string().min(1),
+  query: z.string().min(1),
+  limit: z.coerce.number().int().positive().max(50).optional()
+});
+
+export const taskMemoryQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(200).optional()
+});
+
+export const memoryArtifactListResponseDtoSchema = z.object({
+  projectId: z.string().min(1),
+  total: z.number().int().nonnegative(),
+  artifacts: z.array(dashboardMemoryArtifactSummaryDtoSchema)
+});
+
+export const memorySearchResponseDtoSchema = z.object({
+  projectId: z.string().min(1),
+  query: z.string().min(1),
+  items: z.array(retrievedContextItemSchema)
+});
+
+export const taskMemoryParamsSchema = z.object({
+  taskId: z.string().min(1)
 });
 
 export const dashboardStreamEventDtoSchema = z.object({

@@ -76,6 +76,21 @@ export function buildDashboardStreamUrl(projectId: string): string {
   return buildApiUrl("/api/dashboard/stream", { projectId });
 }
 
+export function buildMemoryListUrl(projectId: string, limit?: number): string {
+  return buildApiUrl("/api/memory", {
+    projectId,
+    ...(limit ? { limit: String(limit) } : {})
+  });
+}
+
+export function buildMemorySearchUrl(projectId: string, query: string, limit?: number): string {
+  return buildApiUrl("/api/memory/search", {
+    projectId,
+    query,
+    ...(limit ? { limit: String(limit) } : {})
+  });
+}
+
 export function buildTaskDetailUrl(taskId: string): string {
   return buildApiUrl(`/api/tasks/${encodeURIComponent(taskId)}`);
 }

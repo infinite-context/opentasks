@@ -13,14 +13,19 @@ import {
   dashboardQuerySchema,
   dashboardStreamEventDtoSchema,
   goalListQuerySchema,
+  memoryListQuerySchema,
+  memorySearchQuerySchema,
   projectListQuerySchema,
-  taskListQuerySchema
+  taskListQuerySchema,
+  taskMemoryParamsSchema,
+  taskMemoryQuerySchema
 } from "@opentasks/contracts/schemas";
 import type { Logger } from "../../infra/logging";
 import type { AgentService } from "../../system/agent-service";
 import type { McpLogStore } from "../../infra/storage/mcp-log-store";
 import type { DashboardQueryService } from "../../system/dashboard-query-service";
 import type { GoalService } from "../../system/goal-service";
+import type { MemoryQueryService } from "../../system/memory-query-service";
 import type { ProjectService } from "../../system/project-service";
 import type { TaskQueryService } from "../../system/task-query-service";
 import type { HttpTransport } from "./types";
@@ -40,6 +45,7 @@ interface CreateHttpTransportParams {
   projectService: ProjectService;
   goalService: GoalService;
   dashboardQueryService: DashboardQueryService;
+  memoryQueryService: MemoryQueryService;
   taskQueryService: TaskQueryService;
   agentService?: AgentService;
   mcpLogStore?: McpLogStore;
@@ -80,6 +86,7 @@ export function createHttpTransport({
   projectService,
   goalService,
   dashboardQueryService,
+  memoryQueryService,
   taskQueryService,
   agentService,
   mcpLogStore,
@@ -230,10 +237,60 @@ export function createHttpTransport({
     return reply.status(200).send(tasks);
   });
 
+  server.get("/api/tasks/:taskId/memory", {
+    schema: {
+      params: taskMemoryParamsSchema,
+      querystring: taskMemoryQuerySchema
+    }
+  }, async (request, reply) => {
+    try {
+      const limit = request.query.limit ?? 50;
+      const payload = await memoryQueryService.listForTask(request.params.taskId, limit);
+      return reply.status(200).send(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.status(404).send({ error: message });
+    }
+  });
+
   server.get("/api/tasks/:taskId", async (request, reply) => {
     const { taskId } = request.params as { taskId: string };
     const detail = await taskQueryService.getTaskDetail(taskId);
     return reply.status(detail.task ? 200 : 404).send(detail);
+  });
+
+  server.get("/api/memory", {
+    schema: {
+      querystring: memoryListQuerySchema
+    }
+  }, async (request, reply) => {
+    try {
+      const limit = request.query.limit ?? 100;
+      const payload = await memoryQueryService.listForProject(request.query.projectId, limit);
+      return reply.status(200).send(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.status(404).send({ error: message });
+    }
+  });
+
+  server.get("/api/memory/search", {
+    schema: {
+      querystring: memorySearchQuerySchema
+    }
+  }, async (request, reply) => {
+    try {
+      const limit = request.query.limit ?? 16;
+      const payload = await memoryQueryService.searchProject(
+        request.query.projectId,
+        request.query.query,
+        limit
+      );
+      return reply.status(200).send(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.status(404).send({ error: message });
+    }
   });
 
   server.get("/api/meta", async (request, reply) => {

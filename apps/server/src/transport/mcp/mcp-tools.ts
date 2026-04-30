@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
   createGoalInputSchema,
@@ -97,7 +98,7 @@ const submitRunContextInputShape = submitRunContextInputSchema.shape;
 
 function withLogging<TArgs, TExtra>(
   toolName: string,
-  handler: (args: TArgs, extra?: TExtra) => Promise<unknown>,
+  handler: (args: TArgs, extra?: TExtra) => Promise<CallToolResult>,
   getAgentForRequest: GetAgentForRequest,
   logStore: McpLogStore | undefined,
   agentService: AgentService | undefined
@@ -106,7 +107,7 @@ function withLogging<TArgs, TExtra>(
   if (!shouldLog) {
     return handler;
   }
-  return async (args: TArgs, extra?: TExtra) => {
+  return async (args: TArgs, extra?: TExtra): Promise<CallToolResult> => {
     let agentDisplayName: string | null = null;
     try {
       agentDisplayName = await getAgentForRequest(args as { agentName?: string }, extra as { sessionId?: string; requestInfo?: { headers?: Record<string, string | string[] | undefined> } });
@@ -173,7 +174,7 @@ export function registerMcpTools(
 
   const wrap = <TArgs, TExtra>(
     toolName: string,
-    handler: (args: TArgs, extra?: TExtra) => Promise<unknown>
+    handler: (args: TArgs, extra?: TExtra) => Promise<CallToolResult>
   ) => withLogging(toolName, handler, getAgentForRequest, logStore, agentService);
 
   server.registerTool(
@@ -278,11 +279,22 @@ export function registerMcpTools(
     },
     wrap("list_tasks", async (args) => {
       const result = await taskQueryService.listTasks(args);
+      const maxLines = 40;
+      const tasks = result.tasks;
+      let detailText = "";
+      if (tasks.length > 0) {
+        const slice = tasks.slice(0, maxLines);
+        detailText = `\n${slice.map((task) => `- ${task.id} | ${task.status} | ${task.title}`).join("\n")}`;
+        if (tasks.length > maxLines) {
+          detailText += `\n… and ${tasks.length - maxLines} more task(s).`;
+        }
+      }
+
       return {
         content: [
           {
             type: "text" as const,
-            text: `Loaded ${result.tasks.length} task(s).`
+            text: `Loaded ${tasks.length} task(s).${detailText}`
           }
         ],
         structuredContent: { ...result }
@@ -300,11 +312,22 @@ export function registerMcpTools(
     },
     wrap("search_tasks", async (args) => {
       const result = await taskQueryService.searchTasks(args);
+      const maxLines = 40;
+      const rows = result.results;
+      let detailText = "";
+      if (rows.length > 0) {
+        const slice = rows.slice(0, maxLines);
+        detailText = `\n${slice.map((entry) => `- ${entry.task.id} | score ${entry.score.toFixed(2)} | ${entry.task.title}`).join("\n")}`;
+        if (rows.length > maxLines) {
+          detailText += `\n… and ${rows.length - maxLines} more match(es).`;
+        }
+      }
+
       return {
         content: [
           {
             type: "text" as const,
-            text: `Found ${result.results.length} task(s) matching \"${result.query}\".`
+            text: `Found ${result.results.length} task(s) matching \"${result.query}\".${detailText}`
           }
         ],
         structuredContent: { ...result }
@@ -349,12 +372,17 @@ export function registerMcpTools(
     wrap("get_project_overview", async (args) => {
       const result = await dashboardQueryService.getSnapshot(args);
       const projectName = result.project?.name ?? result.project?.key ?? args.projectId ?? "current scope";
+      const pid = result.project?.id ?? "(unknown)";
+      const artifactNote =
+        result.learning != null
+          ? ` Learning artifacts indexed: ${result.learning.artifactCount}.`
+          : "";
 
       return {
         content: [
           {
             type: "text" as const,
-            text: `Loaded project overview for ${projectName}.`
+            text: `Loaded project overview for ${projectName}. Project id: ${pid}. Tasks: ${result.summary.totalTasks}.${artifactNote}`
           }
         ],
         structuredContent: { ...result }
@@ -687,7 +715,7 @@ export function registerMcpTools(
   );
 }
 
-function toToolResult(result: OperationResultDto) {
+function toToolResult(result: OperationResultDto): CallToolResult {
   return {
     content: [
       {
@@ -717,7 +745,7 @@ function toolResponse({
   guidance?: string[];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
-}) {
+}): CallToolResult {
   return {
     content: [
       {

@@ -19,7 +19,8 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
       ...process.env,
       OPENTASKS_STORAGE_DRIVER: "memory",
       OPENTASKS_AUTO_MIGRATE: "false",
-      OPENTASKS_HTTP_ENABLED: "false"
+      OPENTASKS_HTTP_ENABLED: "false",
+      OPENTASKS_EMBEDDING_PROVIDER: "noop"
     },
     stderr: "pipe"
   });
@@ -197,7 +198,9 @@ test("mcp transport exposes task lifecycle tools over stdio", async () => {
     assert.equal(explicitClaim.task.id, taskSearch.results[0]?.task.id);
     assert.equal(explicitClaim.task.status, "assigned");
     assert.equal(explicitClaim.task.assignedTo, "agent-explicit");
-    assert.equal(explicitClaim.hydratedContext, null);
+    const hydrated = explicitClaim.hydratedContext as { items?: unknown[] } | null;
+    assert.ok(hydrated != null && Array.isArray(hydrated.items));
+    assert.ok(hydrated!.items!.length > 0);
 
     const overviewResult = await client.callTool({
       name: "get_project_overview",

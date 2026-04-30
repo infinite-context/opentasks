@@ -4,7 +4,7 @@
 
 This document describes the system components and runtime flow for `opentasks`.
 
-The architecture is based on a goal-driven task orchestration system that works alongside external agents, coordinates task execution through MCP, and preserves structured project, goal, and task state in SQLite (via Drizzle ORM) while the retrieval and learning subsystems remain deferred.
+The architecture is based on a goal-driven task orchestration system that works alongside external agents, coordinates task execution through MCP, and preserves structured project, goal, and task state in SQLite (via Drizzle ORM). Learned artifacts are indexed into **sqlite-vec** (SQLite extension) with embeddings from the configured embedding provider (e.g. Ollama); an internal OpenRouter-backed agent generates structured memory rows when learning runs are processed.
 
 ## System boundary
 
@@ -27,7 +27,7 @@ The web UI is the browser-facing observability surface for the system.
 
 It visualizes backend task coordination state through HTTP and SSE, and it uses the same canonical project, goal, task, task event, agent, and MCP log models that the backend uses internally.
 
-Views include: dashboard (summary and pipeline), goals (goal-scoped task lists), tasks (task detail and lifecycle), projects (project selection and creation), agents (agent list and MCP tool logs per agent), MCP (connection status and configuration), analytics, system health, and settings.
+Views include: dashboard (summary, pipeline, learning/memory preview), goals (goal-scoped task lists), tasks (task detail and lifecycle), projects (project selection and creation), agents (agent list and MCP tool logs per agent), MCP (connection status and configuration), **Memory** (artifact list and semantic search against indexed vectors), analytics, system health, and settings.
 
 **Important Architectural Note:** The Web UI is intentionally built using Vanilla TypeScript, raw HTML string templates, and Vite. It does not use a modern reactive framework like React or Vue. This is by design to maintain a specific architectural footprint. Do not attempt to rewrite the frontend to a different framework.
 
@@ -58,13 +58,13 @@ These tools include project creation and lookup, goal creation and update, goal 
 
 ### HTTP Server
 
-The HTTP server is the browser-facing transport for project, goal, dashboard, task inspection, agent, and MCP log flows.
+The HTTP server is the browser-facing transport for project, goal, dashboard, task inspection, agent, MCP log, **memory**, and supporting flows.
 
-It exposes JSON endpoints for project listing and creation, goal listing by project, dashboard snapshots, task lists, task detail, agent list, MCP logs by agent, and supporting browser metadata and file-system flows. It also exposes an SSE stream for live dashboard refresh.
+It exposes JSON endpoints for project listing and creation, goal listing by project, dashboard snapshots, task lists, task detail, agent list, MCP logs by agent, **`GET /api/memory`** (artifact summaries), **`GET /api/memory/search`** (semantic retrieval preview), **`GET /api/tasks/:taskId/memory`** (task-scoped artifacts), and supporting browser metadata and file-system flows. It also exposes an SSE stream for live dashboard refresh.
 
 When MCP over HTTP is enabled, it mounts the MCP handler at `/mcp` (POST for requests, GET for streaming, DELETE for session cleanup). The HTTP server delegates MCP handling to the MCP HTTP handler so browser and agent traffic share the same port.
 
-It exposes the project-aware read endpoints needed by the web UI, including project selection, project-overview reads, goal inspection, dashboard reads, task inspection, agents, and MCP logs.
+It exposes the project-aware read endpoints needed by the web UI, including project selection, project-overview reads, goal inspection, dashboard reads (including optional **`learning`** previews), task inspection, agents, MCP logs, and memory reads for dashboard visualization.
 
 It is built using Fastify and utilizes `fastify-type-provider-zod` for native request validation against the shared `@opentasks/contracts` schemas.
 
@@ -130,47 +130,49 @@ The task resolution service provides query-based task recommendation.
 
 It implements `recommend_task_for_query`: searches tasks by text query, returns a claimable match when available, or suggests the next dependency-ready task when the queried task is blocked. Used by MCP consumers to find work without claiming it first.
 
+### Memory Query Service
+
+The memory query service provides read-side access to persisted **`memory_artifacts`** metadata and sqlite-vec-backed semantic search for HTTP consumers.
+
+It backs **`GET /api/memory`**, **`GET /api/memory/search`**, and **`GET /api/tasks/:taskId/memory`**. MCP intentionally stays minimal here so agents rely on hydrated task context plus coordinator tools rather than browsing raw artifact payloads in chat.
+
 ### Dashboard Query Service
 
 The dashboard query service builds aggregate observability responses for the web UI.
 
-It derives summary metrics, pipeline counts, recent activity, agent workload, and health views from canonical backend task and event data.
+It derives summary metrics, pipeline counts, recent activity, agent workload, health views, and an optional **`learning`** block (artifact totals, recent summaries, indexing policy note, health row) from canonical backend task/event data plus the memory artifact reader.
 
 ### Context Hydrator
 
-The context hydrator will eventually enrich a selected task with relevant prior memory before the task is returned to the external agent.
+The context hydrator enriches a claimed task with relevant prior memory before the task is returned to an agent client.
 
-It gathers this context through the vector search engine.
-
-This component remains part of the architecture, but it is not part of the active runtime yet.
+It gathers ranked **`RetrievedContextItem`** rows through the vector search engine for the active task/project scope.
 
 ### Indexer
 
-The indexer will eventually process completed run data and prepare memory artifacts for storage.
+The indexer processes completion summaries and submitted task/run context notes into structured memory artifacts.
 
-It is responsible for turning run output into indexed chunks or other reusable context objects.
+It deduplicates near-identical payloads where practical and upserts rows into sqlite-vec via the vector database adapter.
 
-This component exists structurally but is not part of the active runtime startup path today.
+Background indexing may run after terminal transitions (`complete_task` / `fail_task`), while **`submit_task_context`** / **`submit_run_context`** can enqueue richer indexing passes; duplicates are skipped heuristically (see dashboard **`indexingPolicyNote`**).
 
 ### Vector Search Engine
 
-The vector search engine will eventually retrieve relevant prior memory for task hydration and indexing workflows.
+The vector search engine retrieves ranked memory for hydration and dashboard memory search previews.
 
-It queries the vector database and returns context for downstream use.
+It queries sqlite-vec tables through the vector database adapter and returns **`RetrievedContextItem`** payloads.
 
 ### Internal Agent
 
-The internal agent is a lower-cost model-driven worker intended for future contextual indexing.
+The internal agent is the OpenRouter-backed worker used by the learning pipeline when configured.
 
-It processes run data and helps generate structured context artifacts for storage.
+It synthesizes summaries and structured artifact bodies from run/task context payloads before embeddings are computed.
 
 ### Model Provider Service
 
-The model provider service is the internal abstraction for future model requests.
+The model provider service abstracts outbound LLM requests.
 
-It sends requests to OpenRouter and returns responses to the internal agent.
-
-It isolates provider-specific logic so additional model backends can be added later without changing the rest of the system.
+It sends requests to OpenRouter for the internal indexing agent (when enabled) and isolates provider-specific logic so additional model backends can be introduced without rewriting orchestration services.
 
 ## Storage components
 
@@ -190,9 +192,11 @@ The current bootstrap path supports legacy SQLite databases by backfilling `task
 
 ### Vector Database
 
-The vector database stores indexed memory artifacts for retrieval.
+The vector database stores embeddings and indexed metadata for memory artifacts (**sqlite-vec**).
 
-It is used by both the vector search engine and the indexing workflow.
+Hydration and **`GET /api/memory/search`** share the same embedding provider configuration used at indexing time.
+
+It is queried by both the vector search engine (hydration + previews) and the indexing workflow.
 
 ## Core loops
 
@@ -223,12 +227,18 @@ The MCP surface also supports session and project management operations used bef
 3. The external agent can create, update, and list goals for a project.
 4. Task creation requires an existing project-goal pair and is rejected with standardized guidance when that context is missing.
 5. The task resolution service supports `recommend_task_for_query` for search-based task discovery without claiming.
+6. Claimed tasks returned through MCP include hydrated vector memory assembled by the context hydrator.
 
 ### Learning loop
 
-The learning loop is the path that will eventually turn completed work into reusable memory.
+The learning loop turns completed work and explicit submissions into reusable stored memory.
 
-This path is intentionally deferred and is not part of the active runtime yet.
+1. Terminal transitions enqueue background processing from completion summaries when enabled.
+2. Agents may call **`submit_task_context`** / **`submit_run_context`** with richer notes; these may trigger additional indexing passes (artifacts remain observable via HTTP/dashboard rather than verbose MCP payloads).
+3. The indexer invokes the internal agent (OpenRouter) when configured, persists **`memory_artifacts`**, embeds content through the embedding provider, and writes vectors into sqlite-vec.
+4. Later tasks hydrate via the vector search engine using project/task-aware ranking.
+
+Duplicate detection is heuristic; consult dashboard copy for the canonical indexing policy wording exposed to operators.
 
 ### Browser read path
 
@@ -236,17 +246,17 @@ The browser read path is the browser-facing observability flow.
 
 1. The web UI selects an active project and requests project-scoped data through the HTTP server.
 2. The HTTP server validates query parameters with shared schemas.
-3. The HTTP server calls the project service, goal service, dashboard query service, task query service, agent service, or MCP log store depending on the view being loaded.
-4. The service layer loads canonical project, goal, task, event, agent, and MCP log data from the coordination store.
+3. The HTTP server calls the project service, goal service, dashboard query service, task query service, agent service, MCP log store, or **memory query service** depending on the view being loaded.
+4. The service layer loads canonical project, goal, task, event, agent, MCP log, and optional memory artifact preview rows from coordination storage + sqlite-backed readers.
 5. Aggregate or list DTOs are built around canonical entities.
 6. The response is returned to the browser as JSON.
 7. The SSE endpoint periodically emits fresh dashboard snapshot events for live updates.
 
-The browser UI uses this read path to maintain its active project context, render project, goal, task, agent, and MCP views, and keep project-scoped dashboard state synchronized with live backend data.
+The browser UI uses this read path to maintain its active project context, render project, goal, task, agent, MCP, **memory**, and dashboard views, and keep project-scoped dashboard state synchronized with live backend data.
 
 ## System flow
 
-The system currently operates through an active goal-driven task coordination path and an active browser read path. The task path handles session startup (project resolution by working directory), project and goal validation, goal selection, dependency-aware claiming, lease management, lifecycle transitions, and delivery through MCP (stdio or HTTP). The browser path handles project selection, project and goal inspection, dashboard/task observability, agent list, and MCP tool logs through HTTP and SSE over the same coordination store. The retrieval, indexing, and model-backed learning components remain deferred for a later phase.
+The system operates through an active goal-driven coordination path, an active browser read path, and an active retrieval/indexing path backed by embeddings + sqlite-vec when configured. MCP stays focused on task lifecycle and hydrated payloads; artifact browsing is intentionally routed through HTTP/dashboard surfaces.
 
 The system exposes standardized operation outcomes for mutation-style workflows so transport adapters can render actionable guidance without owning business rules themselves.
 

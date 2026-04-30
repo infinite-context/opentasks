@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Logger } from "../../infra/logging";
 import { createInMemoryTaskStore } from "../../infra/storage/in-memory-task-store";
+import { createInMemoryVectorDatabase } from "../../infra/storage/vector-database";
+import { createNoopMemoryArtifactReader } from "../../infra/storage/memory-artifact-reader";
 import { createDashboardQueryService } from "../../system/dashboard-query-service";
 import { createGoalService } from "../../system/goal-service";
+import { createMemoryQueryService } from "../../system/memory-query-service";
 import { createProjectService } from "../../system/project-service";
 import { createTaskQueryService } from "../../system/task-query-service";
 import { createValidationService } from "../../system/validation-service";
@@ -48,7 +51,19 @@ test("http transport serves dashboard snapshots and task detail", async () => {
     taskStore,
     validationService
   });
-  const dashboardQueryService = createDashboardQueryService({ logger, taskStore });
+  const memoryArtifactReader = createNoopMemoryArtifactReader();
+  const vectorDatabase = createInMemoryVectorDatabase({ logger });
+  const dashboardQueryService = createDashboardQueryService({
+    logger,
+    taskStore,
+    memoryArtifactReader
+  });
+  const memoryQueryService = createMemoryQueryService({
+    logger,
+    taskStore,
+    memoryArtifactReader,
+    vectorDatabase
+  });
   const taskQueryService = createTaskQueryService({ logger, taskStore });
   const httpTransport = createHttpTransport({
     logger,
@@ -59,6 +74,7 @@ test("http transport serves dashboard snapshots and task detail", async () => {
     projectService,
     goalService,
     dashboardQueryService,
+    memoryQueryService,
     taskQueryService
   });
 
@@ -101,13 +117,22 @@ test("http transport serves dashboard snapshots and task detail", async () => {
     const dashboard = (await dashboardResponse.json()) as {
       tasks: Array<{ id: string }>;
       summary: { totalTasks: number };
-      project: { key: string } | null;
+      project: { key: string; id: string } | null;
+      learning?: { artifactCount: number; indexingPolicyNote: string };
     };
 
     assert.ok(dashboard.project);
     assert.equal(dashboard.project.key, "demo-project");
     assert.ok(dashboard.summary.totalTasks > 0);
     assert.ok(dashboard.tasks.length > 0);
+    assert.ok(dashboard.learning);
+    assert.equal(dashboard.learning!.artifactCount, 0);
+
+    const memoryResponse = await fetch(`http://127.0.0.1:3210/api/memory?projectId=demo-project`);
+    assert.equal(memoryResponse.status, 200);
+    const memoryPayload = (await memoryResponse.json()) as { total: number; artifacts: unknown[]; projectId: string };
+    assert.equal(memoryPayload.total, 0);
+    assert.ok(Array.isArray(memoryPayload.artifacts));
 
     const taskId = dashboard.tasks[0].id;
     const taskResponse = await fetch(`http://127.0.0.1:3210/api/tasks/${encodeURIComponent(taskId)}`);

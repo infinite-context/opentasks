@@ -738,7 +738,8 @@ function getProjectByNameFromDb(db: any, name: string): ProjectRecord | null {
 }
 
 function getProjectByWorkingDirectoryFromDb(db: any, workingDirectory: string): ProjectRecord | null {
-  const all = db.select()
+  const all: ProjectRecord[] = db
+    .select()
     .from(schema.projects)
     .where(ne(schema.projects.workingDirectory, ""))
     .all()

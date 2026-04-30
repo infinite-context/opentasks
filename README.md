@@ -49,7 +49,11 @@ That is the core interaction model of the system.
 1. The external agent completes the task and submits the run context back.
 2. The **Indexer** uses an internal, lower-cost agent to process the completed run.
 3. Relevant knowledge is extracted, vectorized, and stored in the Vector Database.
-4. Future tasks can now retrieve this memory.
+4. Future tasks can now retrieve this memory during hydration before the next assignment.
+
+### Memory & dashboard HTTP APIs
+
+Use the dashboard **Memory** page for browsing indexed artifacts and running semantic previews. Under the hood the web client calls **`GET /api/memory`**, **`GET /api/memory/search`**, and (for drill-down) **`GET /api/tasks/:taskId/memory`** — all backed by the same sqlite-vec store and embedding provider configuration used when hydrating MCP task payloads.
 
 ## Getting Started
 

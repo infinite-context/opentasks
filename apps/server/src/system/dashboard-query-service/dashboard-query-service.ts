@@ -4,17 +4,23 @@ import type {
   DashboardActivityItemDto,
   DashboardAgentStatusDto,
   DashboardHealthItemDto,
+  DashboardLearningSummaryDto,
   DashboardPipelineItemDto,
   DashboardQuery,
   DashboardSnapshotDto
 } from "@opentasks/contracts";
 import type { TaskEvent, TaskRecord, TaskStatus } from "@opentasks/contracts";
 import type { DashboardQueryService } from "./types";
+import type { MemoryArtifactReader } from "../../infra/storage/memory-artifact-reader";
 
 interface CreateDashboardQueryServiceParams {
   logger: Logger;
   taskStore: CoordinationStore;
+  memoryArtifactReader: MemoryArtifactReader;
 }
+
+const INDEXING_POLICY_NOTE =
+  "Terminal transitions enqueue background indexing from completion summaries. submit_task_context / submit_run_context can add richer notes and may trigger additional indexing passes; near-duplicates are skipped heuristically. Use the Memory dashboard to inspect artifacts.";
 
 const PIPELINE_STATUSES: TaskStatus[] = [
   "pending",
@@ -29,7 +35,8 @@ const PIPELINE_STATUSES: TaskStatus[] = [
 
 export function createDashboardQueryService({
   logger,
-  taskStore
+  taskStore,
+  memoryArtifactReader
 }: CreateDashboardQueryServiceParams): DashboardQueryService {
   return {
     async getSnapshot(query?: DashboardQuery): Promise<DashboardSnapshotDto> {
@@ -43,6 +50,15 @@ export function createDashboardQueryService({
       const projectRef = project?.id ?? query?.projectId ?? tasks[0]?.projectId ?? null;
       const recentEvents = projectRef ? await taskStore.listProjectTaskEvents(projectRef, 12) : [];
 
+      let learning: DashboardLearningSummaryDto | undefined;
+      if (project?.id) {
+        learning = {
+          artifactCount: memoryArtifactReader.countByProject(project.id),
+          recentArtifacts: memoryArtifactReader.listByProject(project.id, 8),
+          indexingPolicyNote: INDEXING_POLICY_NOTE
+        };
+      }
+
       return {
         generatedAt: new Date().toISOString(),
         project,
@@ -51,7 +67,8 @@ export function createDashboardQueryService({
         tasks,
         activity: buildActivity(tasks, recentEvents),
         agents: buildAgents(tasks),
-        health: buildHealth(tasks, recentEvents)
+        health: buildHealth(tasks, recentEvents, learning),
+        ...(learning != null ? { learning } : {})
       };
     }
   };
@@ -136,12 +153,16 @@ function buildAgents(tasks: TaskRecord[]): DashboardAgentStatusDto[] {
   return [...agentMap.values()].sort((left, right) => left.agentName.localeCompare(right.agentName));
 }
 
-function buildHealth(tasks: TaskRecord[], events: TaskEvent[]): DashboardHealthItemDto[] {
+function buildHealth(
+  tasks: TaskRecord[],
+  events: TaskEvent[],
+  learning?: DashboardLearningSummaryDto
+): DashboardHealthItemDto[] {
   const blockedTasks = tasks.filter((task) => task.status === "blocked").length;
   const failedTasks = tasks.filter((task) => task.status === "failed").length;
   const recentHeartbeat = events.some((event) => event.eventType === "task_heartbeat");
 
-  return [
+  const items: DashboardHealthItemDto[] = [
     {
       name: "MCP server",
       state: "healthy",
@@ -171,4 +192,17 @@ function buildHealth(tasks: TaskRecord[], events: TaskEvent[]): DashboardHealthI
           : "No failed tasks in the current project view."
     }
   ];
+
+  if (learning) {
+    items.push({
+      name: "Learning memory",
+      state: learning.artifactCount > 0 ? "healthy" : "healthy",
+      detail:
+        learning.artifactCount > 0
+          ? `${learning.artifactCount} artifact(s) indexed for this project view.`
+          : "No indexed artifacts yet for this project view."
+    });
+  }
+
+  return items;
 }

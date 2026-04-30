@@ -19,6 +19,7 @@ import { createSqliteTaskDatabase } from "./infra/storage/sqlite-task-database";
 import { applySqliteSchema } from "./infra/storage/sqlite-schema";
 import { createSqliteVecDatabase } from "./infra/storage/sqlite-vec-database";
 import { createInMemoryVectorDatabase } from "./infra/storage/vector-database";
+import { createSqliteMemoryArtifactReader, createNoopMemoryArtifactReader } from "./infra/storage/memory-artifact-reader";
 import { createAgentService } from "./system/agent-service";
 import { createContextHydrator } from "./system/context-hydrator";
 import { createDashboardQueryService } from "./system/dashboard-query-service";
@@ -27,6 +28,7 @@ import { createGoalService } from "./system/goal-service";
 import { createIndexer } from "./system/indexer";
 import { createInternalAgent } from "./system/internal-agent";
 import { createLearningLoop } from "./system/learning-loop";
+import { createMemoryQueryService } from "./system/memory-query-service";
 import { createModelProviderService } from "./system/model-provider-service";
 import { createProjectService } from "./system/project-service";
 import { createSessionService } from "./system/session-service";
@@ -117,6 +119,9 @@ export function createApp(overrides?: Partial<AppEnv>): App {
         embeddingProvider
       })
     : createInMemoryVectorDatabase({ logger });
+  const memoryArtifactReader = sqliteDb
+    ? createSqliteMemoryArtifactReader({ db: sqliteDb })
+    : createNoopMemoryArtifactReader();
   const vectorSearchEngine = createVectorSearchEngine({
     logger,
     vectorDatabase
@@ -197,10 +202,17 @@ export function createApp(overrides?: Partial<AppEnv>): App {
   });
   const dashboardQueryService = createDashboardQueryService({
     logger,
-    taskStore
+    taskStore,
+    memoryArtifactReader
+  });
+  const memoryQueryService = createMemoryQueryService({
+    logger,
+    taskStore,
+    memoryArtifactReader,
+    vectorDatabase
   });
   const mcpOverHttp = env.mcpEnabled && env.mcpOverHttp && env.httpEnabled;
-  const mcpStdio = env.mcpEnabled && !env.mcpOverHttp;
+  const mcpStdio = env.mcpEnabled && !mcpOverHttp;
 
   const mcpTransport = mcpStdio
     ? createMcpTransport({
@@ -251,6 +263,7 @@ export function createApp(overrides?: Partial<AppEnv>): App {
         projectService,
         goalService,
         dashboardQueryService,
+        memoryQueryService,
         taskQueryService,
         agentService,
         mcpLogStore,

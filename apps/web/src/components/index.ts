@@ -4,6 +4,7 @@ export { renderAgentLogsCard } from "./AgentLogsCard";
 export { renderAgentListSection } from "./AgentListSection";
 export { renderAgentUtilizationCard } from "./AgentUtilizationCard";
 export { renderHealthCard } from "./HealthCard";
+export { renderLearningMemoryCard } from "./LearningMemoryCard";
 export { renderMetricCard } from "./MetricCard";
 export { renderMetricGrid } from "./MetricGrid";
 export { renderPipelineSection } from "./PipelineSection";

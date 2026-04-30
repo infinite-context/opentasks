@@ -4,6 +4,7 @@ import {
   renderActivityCard,
   renderAgentUtilizationCard,
   renderHealthCard,
+  renderLearningMemoryCard,
   renderMetricGrid,
   renderPipelineSection,
   renderTaskDetailCard,
@@ -37,6 +38,10 @@ export function renderDashboardView(props: DashboardViewProps): string {
     <section class="metric-grid">
       ${renderMetricGrid(snapshot)}
     </section>
+
+    <div class="dashboard-memory-slot">
+      ${renderLearningMemoryCard(snapshot)}
+    </div>
 
     <section class="content-grid">
       <div class="stack">

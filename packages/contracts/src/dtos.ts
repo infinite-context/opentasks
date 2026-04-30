@@ -298,6 +298,25 @@ export interface DashboardHealthItemDto {
   detail: string;
 }
 
+/** Summary row for indexed learned memory shown on dashboards */
+export interface DashboardMemoryArtifactSummaryDto {
+  /** Stable artifact identifier (`memory_*` external id) */
+  id: string;
+  taskId: string;
+  goalId: string;
+  kind: string;
+  summary: string | null;
+  createdAt: string;
+}
+
+/** Roll-up of learned memory for dashboard snapshots */
+export interface DashboardLearningSummaryDto {
+  artifactCount: number;
+  recentArtifacts: DashboardMemoryArtifactSummaryDto[];
+  /** Human-readable explanation of when indexing runs */
+  indexingPolicyNote: string;
+}
+
 export interface DashboardSnapshotDto {
   generatedAt: string;
   project: ProjectRecord | null;
@@ -307,12 +326,30 @@ export interface DashboardSnapshotDto {
   activity: DashboardActivityItemDto[];
   agents: DashboardAgentStatusDto[];
   health: DashboardHealthItemDto[];
+  /** Present when project scope is resolved and learning metadata is available */
+  learning?: DashboardLearningSummaryDto | null;
 }
+
 
 export interface DashboardStreamEventDto {
   type: "dashboard.snapshot";
   data: DashboardSnapshotDto;
 }
+
+/** Response for GET /api/memory */
+export interface MemoryArtifactListResponseDto {
+  projectId: string;
+  total: number;
+  artifacts: DashboardMemoryArtifactSummaryDto[];
+}
+
+/** Response for GET /api/memory/search */
+export interface MemorySearchResponseDto {
+  projectId: string;
+  query: string;
+  items: RetrievedContextItem[];
+}
+
 
 export interface OperationContextDto {
   projectId?: string;

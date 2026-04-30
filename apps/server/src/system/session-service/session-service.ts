@@ -138,7 +138,7 @@ export function createSessionService({
       if (project) {
         logger.step("session-service", `Found existing project for ${resolvedPath}.`);
         return buildSessionResult(
-          `Session started. Project "${project.name}" is available.`,
+          `Session started. Project "${project.name}" [${project.id}] is available. Working directory: ${project.workingDirectory}.`,
           project.id,
           project,
           clientCapability
@@ -152,7 +152,7 @@ export function createSessionService({
         if (project) {
           logger.step("session-service", `Found parent project for ${resolvedPath} at ${parentPath}.`);
           return buildSessionResult(
-            `Session started. Project "${project.name}" is available.`,
+            `Session started. Project "${project.name}" [${project.id}] is available. Working directory: ${project.workingDirectory}.`,
             project.id,
             project,
             clientCapability
@@ -192,7 +192,7 @@ export function createSessionService({
       logger.step("session-service", `Creating project "${validatedInput.key}" for ${resolvedPath}.`);
       const created = await projectStore.createProject(validatedInput);
       return buildSessionResult(
-        `Session started. Project "${created.name}" was created.`,
+        `Session started. Project "${created.name}" [${created.id}] was created. Working directory: ${created.workingDirectory}.`,
         created.id,
         created,
         clientCapability

@@ -35,10 +35,13 @@ export function createGoalService({
         );
       }
 
-      return okResult(`Goal "${goal.name}" is available for project "${projectResult.context.project.name}".`, {
-        project: projectResult.context.project,
-        goal
-      });
+      return okResult(
+        `Goal "${goal.name}" [${goal.id}] is available for project "${projectResult.context.project.name}".`,
+        {
+          project: projectResult.context.project,
+          goal
+        }
+      );
     },
     async updateGoal(input: UpdateGoalInput) {
       logger.step("goal-service", `Updating goal "${input.goalId}".`);
@@ -68,10 +71,11 @@ export function createGoalService({
         return validationResult;
       }
 
-      return okResult(
-        `Loaded ${(validationResult.context?.goals ?? []).length} goal(s).`,
-        validationResult.context
-      );
+      const goals = validationResult.context?.goals ?? [];
+      const roster =
+        goals.length === 0 ? "" : `: ${goals.map((goal) => `"${goal.name}" [${goal.id}]`).join("; ")}`;
+
+      return okResult(`Loaded ${goals.length} goal(s)${roster}.`, validationResult.context);
     },
     async resolveNextGoal(projectRef: string): Promise<GoalRecord | null> {
       const validationResult = await validationService.ensureProjectGoals(projectRef);

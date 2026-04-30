@@ -7,13 +7,17 @@ import {
   projectRecordSchema,
   dashboardSnapshotDtoSchema,
   dashboardStreamEventDtoSchema,
+  memoryArtifactListResponseDtoSchema,
+  memorySearchResponseDtoSchema,
   taskDetailDtoSchema,
   taskListDtoSchema,
   type AgentRecordDto,
+  type DashboardMemoryArtifactSummaryDto,
   type McpLogRecordDto,
   type DashboardSnapshotDto,
   type GoalRecord,
   type ProjectRecord,
+  type RetrievedContextItem,
   type TaskRecord
 } from "@opentasks/contracts";
 import "./style.css";
@@ -25,6 +29,8 @@ import {
   buildAnalyticsChartData,
   buildMcpLogsUrl,
   buildGoalListUrl,
+  buildMemoryListUrl,
+  buildMemorySearchUrl,
   buildPickFolderUrl,
   buildProjectListUrl,
   buildDashboardApiUrl,
@@ -51,6 +57,7 @@ import {
   renderAnalyticsView,
   renderDashboardView,
   renderGoalsView,
+  renderMemoryView,
   renderMcpView,
   renderPlaceholderView,
   renderProjectView,
@@ -105,6 +112,25 @@ let projectFormWorkingDirectoryValidateTimeout: ReturnType<typeof setTimeout> | 
 let projectFormBrowseLoading = false;
 let projectFormError = "";
 let projectFormSubmitting = false;
+let memoryArtifacts: DashboardMemoryArtifactSummaryDto[] = [];
+let memoryTotal = 0;
+let memoryListLoading = false;
+let memoryListError = "";
+let memorySearchQuery = "";
+let memorySearchLoading = false;
+let memorySearchError = "";
+let memorySearchResults: RetrievedContextItem[] | null = null;
+
+function resetMemoryViewState(): void {
+  memoryArtifacts = [];
+  memoryTotal = 0;
+  memoryListLoading = false;
+  memoryListError = "";
+  memorySearchQuery = "";
+  memorySearchLoading = false;
+  memorySearchError = "";
+  memorySearchResults = null;
+}
 
 void initializeApp();
 
@@ -251,6 +277,66 @@ async function loadAgentLogs(agentDisplayName: string): Promise<void> {
     agentLogs = [];
   } finally {
     agentLogsLoading = false;
+    renderApp();
+  }
+}
+
+async function loadMemoryList(): Promise<void> {
+  memoryListLoading = true;
+  memoryListError = "";
+  renderApp();
+
+  if (!hasActiveProject()) {
+    memoryArtifacts = [];
+    memoryTotal = 0;
+    memoryListLoading = false;
+    renderApp();
+    return;
+  }
+
+  try {
+    const response = await fetch(buildMemoryListUrl(currentProjectId, 100));
+    if (!response.ok) {
+      throw new Error(`Memory request failed with status ${response.status}.`);
+    }
+    const dto = memoryArtifactListResponseDtoSchema.parse(await response.json());
+    memoryArtifacts = dto.artifacts;
+    memoryTotal = dto.total;
+  } catch (error) {
+    memoryListError = error instanceof Error ? error.message : "Unable to load memory artifacts.";
+    memoryArtifacts = [];
+    memoryTotal = 0;
+  } finally {
+    memoryListLoading = false;
+    renderApp();
+  }
+}
+
+async function runMemorySearch(rawQuery: string): Promise<void> {
+  memorySearchQuery = rawQuery.trim();
+  memorySearchLoading = true;
+  memorySearchError = "";
+  memorySearchResults = null;
+  renderApp();
+
+  if (!memorySearchQuery || !hasActiveProject()) {
+    memorySearchLoading = false;
+    renderApp();
+    return;
+  }
+
+  try {
+    const response = await fetch(buildMemorySearchUrl(currentProjectId, memorySearchQuery, 20));
+    if (!response.ok) {
+      throw new Error(`Memory search failed with status ${response.status}.`);
+    }
+    const dto = memorySearchResponseDtoSchema.parse(await response.json());
+    memorySearchResults = dto.items;
+  } catch (error) {
+    memorySearchError = error instanceof Error ? error.message : "Unable to search memory.";
+    memorySearchResults = null;
+  } finally {
+    memorySearchLoading = false;
     renderApp();
   }
 }
@@ -406,9 +492,14 @@ async function loadDataForCurrentView(): Promise<void> {
     case "mcp":
       await loadMcpMeta();
       break;
+    case "memory":
+      if (!dashboardSnapshot) {
+        await loadDashboardSnapshot();
+      }
+      await loadMemoryList();
+      break;
     case "projects":
     case "runs":
-    case "memory":
     case "settings":
       break;
   }
@@ -539,8 +630,19 @@ function renderMainContent(): string {
         isSubmitting: projectFormSubmitting
       });
     case "runs":
-    case "memory":
       return renderPlaceholderView(getPlaceholderTitle(currentView));
+    case "memory":
+      return renderMemoryView({
+        projectLabel: resolveCurrentProject()?.name ?? currentProjectId,
+        listLoading: memoryListLoading,
+        listError: memoryListError,
+        artifacts: memoryArtifacts,
+        total: memoryTotal,
+        searchQuery: memorySearchQuery,
+        searchLoading: memorySearchLoading,
+        searchError: memorySearchError,
+        searchResults: memorySearchResults
+      });
     case "settings":
       return renderSettingsView({ activeTheme });
     default:
@@ -582,8 +684,9 @@ function getTopbarProps(): { title: string; subtitle: string } {
     case "mcp":
       return { title: "MCP", subtitle: "Server setup" };
     case "runs":
-    case "memory":
       return { title: getPlaceholderTitle(currentView), subtitle: "Coming soon" };
+    case "memory":
+      return { title: "Memory", subtitle: "Artifacts & retrieval preview" };
     case "settings":
       return { title: "Settings", subtitle: "Preferences" };
     default:
@@ -703,6 +806,7 @@ function bindEvents(): void {
         return;
       }
 
+      resetMemoryViewState();
       currentProjectId = nextProjectId;
       goals = [];
       selectedGoalId = "";
@@ -885,6 +989,7 @@ function bindEvents(): void {
       e.preventDefault();
       const projectId = el.dataset.projectId ?? "";
       if (projectId && projectId !== currentProjectId) {
+        resetMemoryViewState();
         currentProjectId = projectId;
         goals = [];
         selectedGoalId = "";
@@ -906,6 +1011,7 @@ function bindEvents(): void {
         e.stopPropagation();
         const projectId = el.dataset.projectId ?? "";
         if (projectId && projectId !== currentProjectId) {
+          resetMemoryViewState();
           currentProjectId = projectId;
           goals = [];
           selectedGoalId = "";
@@ -1003,6 +1109,12 @@ function bindEvents(): void {
       }
     });
   });
+
+  document.querySelector<HTMLFormElement>("[data-memory-search-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const input = document.querySelector<HTMLInputElement>("#memory-search-input");
+    void runMemorySearch(input?.value ?? memorySearchQuery);
+  });
 }
 
 async function validateWorkingDirectory(path: string): Promise<void> {
@@ -1073,6 +1185,7 @@ async function submitProjectForm(): Promise<void> {
     projectFormWorkingDirectory = "";
     projectFormWorkingDirectoryValid = null;
     projectFormWorkingDirectoryError = "";
+    resetMemoryViewState();
     currentProjectId = project.id;
     currentView = "dashboard";
     selectedAgentName = "";

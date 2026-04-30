@@ -7,11 +7,14 @@ import { JSONRPCMessageSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Logger } from "../../infra/logging";
 import { createInMemoryAgentStore } from "../../infra/storage/in-memory-agent-store";
 import { createInMemoryTaskStore } from "../../infra/storage/in-memory-task-store";
+import { createInMemoryVectorDatabase } from "../../infra/storage/vector-database";
+import { createNoopMemoryArtifactReader } from "../../infra/storage/memory-artifact-reader";
 import { createAgentService } from "../../system/agent-service";
 import { createDashboardQueryService } from "../../system/dashboard-query-service";
 import { createExecutionLoop } from "../../system/execution-loop";
 import { createGoalService } from "../../system/goal-service";
 import type { LearningLoop } from "../../system/learning-loop";
+import { createMemoryQueryService } from "../../system/memory-query-service";
 import { createProjectService } from "../../system/project-service";
 import { createSessionService } from "../../system/session-service";
 import { createTaskListManager } from "../../system/task-list-manager";
@@ -190,7 +193,19 @@ test("mcp over http assigns agent per session and task lifecycle works without a
     taskQueryService,
     taskStore
   });
-  const dashboardQueryService = createDashboardQueryService({ logger, taskStore });
+  const memoryArtifactReader = createNoopMemoryArtifactReader();
+  const vectorDatabase = createInMemoryVectorDatabase({ logger });
+  const dashboardQueryService = createDashboardQueryService({
+    logger,
+    taskStore,
+    memoryArtifactReader
+  });
+  const memoryQueryService = createMemoryQueryService({
+    logger,
+    taskStore,
+    memoryArtifactReader,
+    vectorDatabase
+  });
   const learningRuns: Array<Parameters<LearningLoop["run"]>[0]> = [];
   const learningLoop: LearningLoop = {
     async run(run: Parameters<LearningLoop["run"]>[0]) {
@@ -233,6 +248,7 @@ test("mcp over http assigns agent per session and task lifecycle works without a
     projectService,
     goalService,
     dashboardQueryService,
+    memoryQueryService,
     taskQueryService,
     mcpHandler
   });
